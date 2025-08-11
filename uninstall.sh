@@ -23,13 +23,19 @@ if [ ! -f "$HOOKS_DIR/secure-command.js" ] && [ ! -f "$HOOKS_DIR/guardian-wrappe
     exit 0
 fi
 
-echo -e "${YELLOW}This will remove the Claude Secrets Guardian hook from your system.${NC}"
-echo -n "Are you sure you want to continue? (y/N): "
-read -r response
-
-if [[ ! "$response" =~ ^[Yy]$ ]]; then
-    echo -e "${BLUE}Uninstall cancelled.${NC}"
-    exit 0
+# Check if running interactively (not through pipe)
+if [ -t 0 ]; then
+    echo -e "${YELLOW}This will remove the Claude Secrets Guardian hook from your system.${NC}"
+    echo -n "Are you sure you want to continue? (y/N): "
+    read -r response
+    
+    if [[ ! "$response" =~ ^[Yy]$ ]]; then
+        echo -e "${BLUE}Uninstall cancelled.${NC}"
+        exit 0
+    fi
+else
+    # Non-interactive mode (piped through curl)
+    echo -e "${YELLOW}Removing Claude Secrets Guardian hook...${NC}"
 fi
 
 echo

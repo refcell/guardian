@@ -48,19 +48,20 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-# Create the session-start-hook.js (Session start notifications)
-echo -e "${YELLOW}Creating session start hook...${NC}"
+# Download or copy the session-start-hook.js v2 (Session start notifications)
+echo -e "${YELLOW}Installing session start hook v2...${NC}"
 
 # Check if we're running from the repo or from curl
-if [ -f "scripts/create-session-hook.js" ]; then
-    # Running from local repo
-    node scripts/create-session-hook.js
-elif [ -f "$HOOKS_DIR/../scripts/create-session-hook.js" ]; then
-    # Already installed, use existing script
-    node "$HOOKS_DIR/../scripts/create-session-hook.js"
+if [ -f "hooks/session-start-hook.js" ]; then
+    # Running from local repo - copy the v2 hook
+    cp hooks/session-start-hook.js "$HOOKS_DIR/session-start-hook.js"
 else
-    # Download and run the script from GitHub
-    curl -sSL "${GITHUB_RAW_URL}/scripts/create-session-hook.js" | node
+    # Download the v2 hook from GitHub
+    curl -sSL "${GITHUB_RAW_URL}/hooks/session-start-hook.js" -o "$HOOKS_DIR/session-start-hook.js"
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}Failed to download session-start-hook.js${NC}"
+        exit 1
+    fi
 fi
 
 # Verify the downloaded file is valid JavaScript (not HTML error page)

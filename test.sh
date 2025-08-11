@@ -8,26 +8,25 @@ BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
-# Claude configuration directory
-CLAUDE_CONFIG_DIR="$HOME/.config/claude"
+# Claude Code configuration directory (correct location)
+CLAUDE_CONFIG_DIR="$HOME/.claude"
 HOOKS_DIR="$CLAUDE_CONFIG_DIR/hooks"
-AGENTS_DIR="$CLAUDE_CONFIG_DIR/agents"
 
 echo -e "${BLUE}=== Claude Secrets Guardian Hook Test Suite ===${NC}"
 echo
 
 # Check if hook is installed
-if [ ! -f "$HOOKS_DIR/secure-command.js" ]; then
-    echo -e "${RED}❌ Error: Hook not installed at $HOOKS_DIR/secure-command.js${NC}"
+if [ ! -f "$HOOKS_DIR/secure-command.js" ] && [ ! -f "$HOOKS_DIR/guardian-wrapper.sh" ]; then
+    echo -e "${RED}❌ Error: Hook not installed in $HOOKS_DIR${NC}"
     echo -e "${YELLOW}Please run the installer first:${NC}"
-    echo "  curl -sSL https://raw.githubusercontent.com/refcell/guardian/main/install.sh | bash"
+    echo "  curl -sSL guardian.refcell.org/install | bash"
     exit 1
 fi
 
-if [ ! -f "$AGENTS_DIR/secrets-guardian.json" ]; then
-    echo -e "${RED}❌ Error: Agent config not found at $AGENTS_DIR/secrets-guardian.json${NC}"
+if [ ! -f "$HOOKS_DIR/secrets-guardian.json" ]; then
+    echo -e "${RED}❌ Error: Configuration not found at $HOOKS_DIR/secrets-guardian.json${NC}"
     echo -e "${YELLOW}Please run the installer first:${NC}"
-    echo "  curl -sSL https://raw.githubusercontent.com/refcell/guardian/main/install.sh | bash"
+    echo "  curl -sSL guardian.refcell.org/install | bash"
     exit 1
 fi
 
@@ -119,12 +118,12 @@ SETTINGS_FILE="$CLAUDE_CONFIG_DIR/settings.json"
 if [ -f "$SETTINGS_FILE" ]; then
     echo -e "${GREEN}✅ Settings file exists${NC}"
     
-    # Check for hook configurations
-    for hook in "pre-write" "pre-edit" "pre-bash" "pre-commit"; do
-        if grep -q "\"$hook\".*secure-command.js" "$SETTINGS_FILE"; then
-            echo -e "${GREEN}✅ Hook configured: $hook${NC}"
+    # Check for PreToolUse hook configurations
+    for tool in "Write" "Edit" "MultiEdit" "Bash"; do
+        if grep -q "\"$tool\".*guardian-wrapper.sh" "$SETTINGS_FILE"; then
+            echo -e "${GREEN}✅ PreToolUse.$tool configured${NC}"
         else
-            echo -e "${YELLOW}⚠️  Hook not configured: $hook${NC}"
+            echo -e "${YELLOW}⚠️  PreToolUse.$tool not configured${NC}"
         fi
     done
 else

@@ -13,10 +13,9 @@ NC='\033[0m' # No Color
 GITHUB_REPO="refcell/guardian"
 GITHUB_RAW_URL="https://raw.githubusercontent.com/${GITHUB_REPO}/main"
 
-# Claude configuration directory
-CLAUDE_CONFIG_DIR="$HOME/.config/claude"
+# Claude Code configuration directory (correct location)
+CLAUDE_CONFIG_DIR="$HOME/.claude"
 HOOKS_DIR="$CLAUDE_CONFIG_DIR/hooks"
-AGENTS_DIR="$CLAUDE_CONFIG_DIR/agents"
 
 echo -e "${BLUE}=== Claude Secrets Guardian Hook Installer ===${NC}"
 echo -e "${BLUE}Installing from: github.com/${GITHUB_REPO}${NC}"
@@ -38,10 +37,58 @@ fi
 echo -e "${YELLOW}Creating Claude configuration directories...${NC}"
 mkdir -p "$CLAUDE_CONFIG_DIR"
 mkdir -p "$HOOKS_DIR"
-mkdir -p "$AGENTS_DIR"
 
 # Download hook files from GitHub
 echo -e "${YELLOW}Downloading secrets-guardian hook from GitHub...${NC}"
+
+# Download the wrapper script
+cat > "$HOOKS_DIR/guardian-wrapper.sh" <<'EOF'
+#!/bin/bash
+# Guardian wrapper script for Claude Code hooks
+
+HOOKS_DIR="$(dirname "$0")"
+NODE_SCRIPT="$HOOKS_DIR/secure-command.js"
+
+# Get the tool name and content from Claude Code
+TOOL_NAME="$1"
+shift
+
+# Read content from stdin or arguments
+if [ -t 0 ]; then
+    # Input from arguments
+    CONTENT="$*"
+else
+    # Input from stdin
+    CONTENT=$(cat)
+fi
+
+# Run the Node.js script based on tool type
+case "$TOOL_NAME" in
+    "Write"|"Edit"|"MultiEdit")
+        echo "$CONTENT" | node "$NODE_SCRIPT" --file
+        ;;
+    "Bash")
+        echo "$CONTENT" | node "$NODE_SCRIPT" --command
+        ;;
+    *)
+        # Unknown tool, let it pass
+        exit 0
+        ;;
+esac
+
+EXIT_CODE=$?
+
+# If secrets were found, block the operation
+if [ $EXIT_CODE -ne 0 ]; then
+    echo "❌ Operation blocked: Secrets detected!" >&2
+    echo "Please remove sensitive information before proceeding." >&2
+    exit 1
+fi
+
+exit 0
+EOF
+
+chmod +x "$HOOKS_DIR/guardian-wrapper.sh"
 
 # Download the secure-command.js hook
 curl -sSL "${GITHUB_RAW_URL}/hooks/secure-command.js" -o "$HOOKS_DIR/secure-command.js"
@@ -50,19 +97,23 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-# Download the agent configuration
-curl -sSL "${GITHUB_RAW_URL}/agents/secrets-guardian.json" -o "$AGENTS_DIR/secrets-guardian.json"
+# Download the agent configuration  
+curl -sSL "${GITHUB_RAW_URL}/agents/secrets-guardian.json" -o "$HOOKS_DIR/secrets-guardian.json"
 if [ $? -ne 0 ]; then
     echo -e "${RED}Failed to download secrets-guardian.json${NC}"
     exit 1
 fi
+
+# Update the secure-command.js to use the local config
+sed -i.bak "s|../agents/secrets-guardian.json|./secrets-guardian.json|g" "$HOOKS_DIR/secure-command.js"
+rm -f "$HOOKS_DIR/secure-command.js.bak"
 
 # Make the hook executable
 chmod +x "$HOOKS_DIR/secure-command.js"
 
 echo -e "${GREEN}✅ Files downloaded successfully${NC}"
 
-# Create or update Claude settings.json
+# Create or update Claude settings.json with correct format
 SETTINGS_FILE="$CLAUDE_CONFIG_DIR/settings.json"
 
 if [ -f "$SETTINGS_FILE" ]; then
@@ -70,7 +121,7 @@ if [ -f "$SETTINGS_FILE" ]; then
     # Backup existing settings
     cp "$SETTINGS_FILE" "$SETTINGS_FILE.backup.$(date +%Y%m%d_%H%M%S)"
     
-    # Use node to update JSON properly
+    # Use node to update JSON properly with Claude Code format
     node -e "
     const fs = require('fs');
     const settings = JSON.parse(fs.readFileSync('$SETTINGS_FILE', 'utf8'));
@@ -80,11 +131,16 @@ if [ -f "$SETTINGS_FILE" ]; then
         settings.hooks = {};
     }
     
-    // Add our hook configurations
-    settings.hooks['pre-write'] = '$HOOKS_DIR/secure-command.js --file';
-    settings.hooks['pre-edit'] = '$HOOKS_DIR/secure-command.js --file';
-    settings.hooks['pre-bash'] = '$HOOKS_DIR/secure-command.js --command';
-    settings.hooks['pre-commit'] = '$HOOKS_DIR/secure-command.js --file';
+    // Initialize PreToolUse if not present
+    if (!settings.hooks.PreToolUse) {
+        settings.hooks.PreToolUse = {};
+    }
+    
+    // Add our hook configurations for Claude Code
+    settings.hooks.PreToolUse.Write = '$HOOKS_DIR/guardian-wrapper.sh Write';
+    settings.hooks.PreToolUse.Edit = '$HOOKS_DIR/guardian-wrapper.sh Edit';
+    settings.hooks.PreToolUse.MultiEdit = '$HOOKS_DIR/guardian-wrapper.sh MultiEdit';
+    settings.hooks.PreToolUse.Bash = '$HOOKS_DIR/guardian-wrapper.sh Bash';
     
     fs.writeFileSync('$SETTINGS_FILE', JSON.stringify(settings, null, 2));
     "
@@ -93,14 +149,12 @@ else
     cat > "$SETTINGS_FILE" <<EOF
 {
   "hooks": {
-    "pre-write": "$HOOKS_DIR/secure-command.js --file",
-    "pre-edit": "$HOOKS_DIR/secure-command.js --file",
-    "pre-bash": "$HOOKS_DIR/secure-command.js --command",
-    "pre-commit": "$HOOKS_DIR/secure-command.js --file"
-  },
-  "security": {
-    "scan_for_secrets": true,
-    "block_on_secrets": true
+    "PreToolUse": {
+      "Write": "$HOOKS_DIR/guardian-wrapper.sh Write",
+      "Edit": "$HOOKS_DIR/guardian-wrapper.sh Edit",
+      "MultiEdit": "$HOOKS_DIR/guardian-wrapper.sh MultiEdit",
+      "Bash": "$HOOKS_DIR/guardian-wrapper.sh Bash"
+    }
   }
 }
 EOF
@@ -109,10 +163,6 @@ fi
 # Test the installation
 echo
 echo -e "${YELLOW}Testing installation...${NC}"
-
-# Create a temporary test file
-TEMP_TEST_FILE=$(mktemp)
-echo "const safe = true;" > "$TEMP_TEST_FILE"
 
 # Test with safe content
 echo -e "Testing with safe content..."
@@ -130,31 +180,25 @@ else
     echo -e "${GREEN}✅ Secret detection test passed - secrets blocked${NC}"
 fi
 
-# Clean up temp file
-rm -f "$TEMP_TEST_FILE"
-
 # Verification
 echo
 echo -e "${GREEN}✅ Installation complete!${NC}"
 echo
 echo -e "${BLUE}Installation Summary:${NC}"
 echo "  • Hooks installed to: $HOOKS_DIR"
-echo "  • Agent config installed to: $AGENTS_DIR"
 echo "  • Settings updated at: $SETTINGS_FILE"
 echo
-echo -e "${YELLOW}Configured hooks:${NC}"
-echo "  • pre-write: Scans files before writing"
-echo "  • pre-edit: Scans files before editing"
-echo "  • pre-bash: Scans bash commands before execution"
-echo "  • pre-commit: Scans files before git commits"
+echo -e "${YELLOW}Configured hooks (PreToolUse):${NC}"
+echo "  • Write: Scans content before writing files"
+echo "  • Edit: Scans content before editing files"
+echo "  • MultiEdit: Scans content before multi-editing files"
+echo "  • Bash: Scans commands before execution"
 echo
 echo -e "${GREEN}The secrets guardian is now active and will block any attempts to expose secrets!${NC}"
 echo
 echo -e "${BLUE}To verify the installation worked:${NC}"
-echo "  1. Try creating a file with a secret in Claude"
+echo "  1. Try creating a file with a secret in Claude Code"
 echo "  2. The operation should be blocked with a security warning"
 echo
 echo -e "${YELLOW}To uninstall:${NC}"
-echo "  Remove the hook entries from: $SETTINGS_FILE"
-echo "  Delete: $HOOKS_DIR/secure-command.js"
-echo "  Delete: $AGENTS_DIR/secrets-guardian.json"
+echo "  curl -sSL guardian.refcell.org/uninstall | bash"

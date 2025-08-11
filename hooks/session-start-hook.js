@@ -114,9 +114,11 @@ class SecretsScanner {
                 pattern.lastIndex = 0;
                 const matches = [...contentStr.matchAll(pattern)];
                 for (const match of matches) {
+                    const fullMatch = match[0];
                     findings.push({
                         type: category,
-                        match: match[0].substring(0, 30) + (match[0].length > 30 ? '...' : ''),
+                        match: fullMatch,
+                        preview: fullMatch.substring(0, 8) + '...',
                         position: match.index
                     });
                 }
@@ -174,6 +176,7 @@ class SecretsScanner {
                                 type: 'file',
                                 path: file,
                                 secrets: findings.length,
+                                findings: findings,
                                 types: [...new Set(findings.map(f => f.type))],
                                 isGitIgnored: this.isFileGitIgnored(file, cwd)
                             });
@@ -263,6 +266,7 @@ class SecretsScanner {
                                 exposedSecrets.push({
                                     file,
                                     secrets: findings.length,
+                                    findings: findings,
                                     types: [...new Set(findings.map(f => f.type))]
                                 });
                             }
@@ -288,37 +292,78 @@ class SecretsScanner {
 }
 
 function formatSecurityReport(sessionType, envWarnings, fileWarnings) {
-    const totalWarnings = envWarnings.length + fileWarnings.length;
+    const allSecrets = [];
     
-    // If no warnings, show minimal message
-    if (totalWarnings === 0) {
+    // Collect environment secrets
+    for (const warning of envWarnings) {
+        allSecrets.push({
+            type: formatSecretType(warning.variable),
+            preview: warning.preview,
+            location: 'environment'
+        });
+    }
+    
+    // Collect file secrets
+    const exposedFiles = fileWarnings.filter(w => w.type === 'file' && !w.isGitIgnored);
+    for (const file of exposedFiles) {
+        if (file.findings) {
+            for (const finding of file.findings) {
+                allSecrets.push({
+                    type: formatSecretType(finding.type),
+                    preview: finding.preview,
+                    location: file.path
+                });
+            }
+        }
+    }
+    
+    // Collect staged file secrets
+    const stagedFiles = fileWarnings.filter(w => w.type === 'git-staged');
+    for (const staged of stagedFiles) {
+        if (staged.files) {
+            for (const file of staged.files) {
+                if (file.findings) {
+                    for (const finding of file.findings) {
+                        allSecrets.push({
+                            type: formatSecretType(finding.type),
+                            preview: finding.preview,
+                            location: file.file
+                        });
+                    }
+                }
+            }
+        }
+    }
+    
+    // If no secrets, show minimal message
+    if (allSecrets.length === 0) {
         return `${colors.cyan}🛡️ Guardian: ${colors.green}Session protected, no secrets detected${colors.reset}\n`;
     }
     
-    // Concise warning format
-    let message = `${colors.red}🚨 Guardian Warning: ${totalWarnings} security issue(s) detected${colors.reset}\n`;
+    // Format concise warning with actual secrets
+    let message = `${colors.red}🚨 ${allSecrets.length} secret${allSecrets.length === 1 ? '' : 's'} detected:${colors.reset}\n`;
     
-    // Environment warnings - concise
-    if (envWarnings.length > 0) {
-        message += `${colors.yellow}Environment:${colors.reset} ${envWarnings.map(w => w.variable).join(', ')}\n`;
+    // Show each secret with type, preview, and location
+    for (const secret of allSecrets) {
+        message += `${colors.red}•${colors.reset} ${secret.type} (${colors.dim}${secret.preview}${colors.reset}) in ${colors.yellow}${secret.location}${colors.reset}\n`;
     }
     
-    // File warnings - concise
-    const exposedFiles = fileWarnings.filter(w => w.type === 'file' && !w.isGitIgnored);
-    const stagedFiles = fileWarnings.filter(w => w.type === 'git-staged');
-    
-    if (exposedFiles.length > 0) {
-        message += `${colors.red}Exposed files:${colors.reset} ${exposedFiles.map(w => w.path).join(', ')}\n`;
-    }
-    
-    if (stagedFiles.length > 0) {
-        const files = stagedFiles[0].files.map(f => f.file).join(', ');
-        message += `${colors.red}Staged secrets:${colors.reset} ${files}\n`;
-    }
-    
-    message += `${colors.yellow}Fix:${colors.reset} Add to .gitignore or remove secrets\n`;
+    message += `${colors.yellow}Fix:${colors.reset} Add files to .gitignore or use environment variables\n`;
     
     return message;
+}
+
+function formatSecretType(type) {
+    const typeMap = {
+        aws_credentials: 'AWS Key',
+        api_keys: 'API Token',
+        github_tokens: 'GitHub Token',
+        database_urls: 'Database URL',
+        private_keys: 'Private Key',
+        jwt_secrets: 'JWT Secret',
+        environment: 'Environment Variable'
+    };
+    return typeMap[type] || type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
 }
 
 function processSessionStart(input) {

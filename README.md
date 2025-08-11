@@ -50,7 +50,25 @@ The installer will:
 
 ## Testing
 
-The installer automatically runs tests to verify the hooks are working. You can also manually test the hooks are functioning:
+After installation, run the comprehensive test suite to verify everything is working:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/refcell/guardian/main/test.sh | bash
+```
+
+Or download and run locally:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/refcell/guardian/main/test.sh -o test-guardian.sh
+chmod +x test-guardian.sh
+./test-guardian.sh
+```
+
+The test script will:
+- Verify the hook is properly installed
+- Test detection of various secret types
+- Confirm safe content isn't blocked
+- Check hook configuration in settings.json
 
 ## Manual Testing
 

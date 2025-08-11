@@ -11,6 +11,11 @@
       "permanent": false
     },
     {
+      "source": "/uninstall.sh",
+      "destination": "https://raw.githubusercontent.com/refcell/guardian/main/uninstall.sh",
+      "permanent": false
+    },
+    {
       "source": "/install",
       "destination": "https://raw.githubusercontent.com/refcell/guardian/main/install.sh",
       "permanent": false
@@ -18,6 +23,11 @@
     {
       "source": "/test",
       "destination": "https://raw.githubusercontent.com/refcell/guardian/main/test.sh",
+      "permanent": false
+    },
+    {
+      "source": "/uninstall",
+      "destination": "https://raw.githubusercontent.com/refcell/guardian/main/uninstall.sh",
       "permanent": false
     },
     {

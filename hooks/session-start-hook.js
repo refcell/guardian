@@ -46,9 +46,10 @@ function debugLog(message) {
 
 function getSessionType(data) {
     // Determine session type from the event data
-    if (data.matcher === 'startup') return 'new';
-    if (data.matcher === 'resume') return 'resumed';
-    if (data.matcher === 'clear') return 'cleared';
+    // According to docs, the field is 'source' not 'matcher'
+    if (data.source === 'startup' || data.matcher === 'startup') return 'new';
+    if (data.source === 'resume' || data.matcher === 'resume') return 'resumed';
+    if (data.source === 'clear' || data.matcher === 'clear') return 'cleared';
     return 'unknown';
 }
 

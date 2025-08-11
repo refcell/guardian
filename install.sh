@@ -48,22 +48,107 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-# Download the session-start-hook.js (Session start notifications)
-curl -sSL "${GITHUB_RAW_URL}/hooks/session-start-hook.js" -o "$HOOKS_DIR/session-start-hook.js" 2>/dev/null || {
-    echo -e "${YELLOW}Note: Session start hook not available on remote, using fallback${NC}"
-    # Create a simple fallback session hook
-    cat > "$HOOKS_DIR/session-start-hook.js" << 'EOF'
+# Create the session-start-hook.js (Session start notifications)
+echo -e "${YELLOW}Creating session start hook...${NC}"
+cat > "$HOOKS_DIR/session-start-hook.js" << 'EOF'
 #!/usr/bin/env node
+
+/**
+ * SessionStart Hook for Guardian
+ * Displays security status when Claude Code sessions start
+ */
+
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
+
+const HOOKS_DIR = path.join(os.homedir(), '.claude', 'hooks');
+const CONFIG_FILE = path.join(HOOKS_DIR, 'secrets-guardian.json');
+
 const colors = {
-    cyan: '\x1b[36m',
+    reset: '\x1b[0m',
+    bright: '\x1b[1m',
+    dim: '\x1b[2m',
+    red: '\x1b[31m',
     green: '\x1b[32m',
-    reset: '\x1b[0m'
+    yellow: '\x1b[33m',
+    blue: '\x1b[34m',
+    cyan: '\x1b[36m'
 };
-console.log(`${colors.cyan}🛡️ Guardian Security Active${colors.reset}`);
-console.log(`${colors.green}Your session is protected against secret exposure${colors.reset}\n`);
-process.exit(0);
-EOF
+
+function getProtectedPatterns() {
+    try {
+        const config = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
+        return Object.keys(config.patterns || {});
+    } catch (e) {
+        return ['API Keys', 'AWS Credentials', 'Passwords', 'Tokens', 'Private Keys', 'Database URLs'];
+    }
 }
+
+function main() {
+    let input = '';
+    const patterns = getProtectedPatterns();
+    
+    // Format message
+    let message = `\n${colors.cyan}${colors.bright}🛡️ Guardian Security Active${colors.reset}\n`;
+    message += `${colors.dim}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${colors.reset}\n\n`;
+    
+    try {
+        // Read input to determine session type
+        process.stdin.setEncoding('utf8');
+        process.stdin.on('data', chunk => input += chunk);
+        process.stdin.on('end', () => {
+            try {
+                const data = input ? JSON.parse(input) : {};
+                const source = data.source || data.matcher || 'startup';
+                
+                if (source === 'startup') {
+                    message += `${colors.green}Welcome! Your Claude Code session is protected.${colors.reset}\n\n`;
+                } else if (source === 'resume') {
+                    message += `${colors.green}Session resumed with security protection.${colors.reset}\n\n`;
+                } else if (source === 'clear') {
+                    message += `${colors.green}Session cleared. Starting fresh with protection.${colors.reset}\n\n`;
+                }
+            } catch (e) {
+                message += `${colors.green}Your session is protected against secret exposure.${colors.reset}\n\n`;
+            }
+            
+            message += `${colors.yellow}Protected Secret Types:${colors.reset}\n`;
+            patterns.forEach(pattern => {
+                const displayName = pattern.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+                message += `  ${colors.cyan}•${colors.reset} ${displayName}\n`;
+            });
+            
+            message += `\n${colors.blue}Security Features:${colors.reset}\n`;
+            message += `  ${colors.green}✓${colors.reset} Blocks hardcoded secrets in code\n`;
+            message += `  ${colors.green}✓${colors.reset} Scans user prompts for sensitive data\n`;
+            message += `  ${colors.green}✓${colors.reset} Protects Claude's responses from leaks\n`;
+            message += `  ${colors.green}✓${colors.reset} Monitors file operations and commands\n`;
+            
+            message += `\n${colors.dim}Tip: Use environment variables instead of hardcoded secrets${colors.reset}\n`;
+            message += `${colors.dim}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${colors.reset}\n`;
+            
+            console.log(message);
+            process.exit(0);
+        });
+        
+        // Timeout fallback
+        setTimeout(() => {
+            console.log(message);
+            process.exit(0);
+        }, 1000);
+    } catch (e) {
+        // Fallback message
+        console.log(`${colors.cyan}🛡️ Guardian Security Active${colors.reset}`);
+        console.log(`${colors.green}Your session is protected against secret exposure${colors.reset}\n`);
+        process.exit(0);
+    }
+}
+
+if (require.main === module) {
+    main();
+}
+EOF
 
 # Verify the downloaded file is valid JavaScript (not HTML error page)
 if head -n 1 "$HOOKS_DIR/guardian-hook.js" | grep -q "404" || head -n 1 "$HOOKS_DIR/guardian-hook.js" | grep -q "<" ; then
@@ -100,7 +185,7 @@ fi
 chmod +x "$HOOKS_DIR/guardian-hook.js"
 chmod +x "$HOOKS_DIR/session-start-hook.js" 2>/dev/null || true
 
-echo -e "${GREEN}✅ Files downloaded successfully${NC}"
+echo -e "${GREEN}✅ Hook files created successfully${NC}"
 
 # Create or update Claude settings.json with correct format
 SETTINGS_FILE="$CLAUDE_CONFIG_DIR/settings.json"
@@ -171,13 +256,15 @@ if [ -f "$SETTINGS_FILE" ]; then
         !h.hooks[0].command.includes('session-start-hook.js')
     );
     
-    // Add session start hooks for different matchers
+    // Add session start hooks for different matchers with absolute paths
+    const sessionHookPath = require('path').join('$HOOKS_DIR', 'session-start-hook.js');
     ['startup', 'resume', 'clear'].forEach(matcher => {
         settings.hooks.SessionStart.push({
             matcher: matcher,
             hooks: [{
                 type: 'command',
-                command: '$HOOKS_DIR/session-start-hook.js'
+                command: sessionHookPath,
+                timeout: 10
             }]
         });
     });
@@ -217,7 +304,8 @@ else
         "hooks": [
           {
             "type": "command",
-            "command": "$HOOKS_DIR/session-start-hook.js"
+            "command": "$HOOKS_DIR/session-start-hook.js",
+            "timeout": 10
           }
         ]
       },
@@ -226,7 +314,8 @@ else
         "hooks": [
           {
             "type": "command",
-            "command": "$HOOKS_DIR/session-start-hook.js"
+            "command": "$HOOKS_DIR/session-start-hook.js",
+            "timeout": 10
           }
         ]
       },
@@ -235,7 +324,8 @@ else
         "hooks": [
           {
             "type": "command",
-            "command": "$HOOKS_DIR/session-start-hook.js"
+            "command": "$HOOKS_DIR/session-start-hook.js",
+            "timeout": 10
           }
         ]
       }

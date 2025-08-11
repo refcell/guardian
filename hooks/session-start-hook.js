@@ -67,11 +67,40 @@ class SecretsScanner {
             return compiled;
         } catch (e) {
             debugLog(`Error loading patterns: ${e.message}`);
-            // Fallback patterns
+            // Enhanced fallback patterns for common secrets
             return {
-                aws_credentials: [/AKIA[0-9A-Z]{16}/gi],
-                api_keys: [/sk-[a-zA-Z0-9]{48}/gi],
-                github_tokens: [/ghp_[a-zA-Z0-9]{36}/gi]
+                aws_credentials: [
+                    /AKIA[0-9A-Z]{16}/gi,
+                    /AWS_ACCESS_KEY_ID\s*=\s*[A-Z0-9]{20}/gi,
+                    /AWS_SECRET_ACCESS_KEY\s*=\s*[A-Za-z0-9/+=]{40}/gi
+                ],
+                api_keys: [
+                    /sk-[a-zA-Z0-9]{48}/gi,
+                    /API_KEY\s*=\s*[a-zA-Z0-9_-]{20,}/gi,
+                    /OPENAI_API_KEY\s*=\s*sk-[a-zA-Z0-9]{48}/gi,
+                    /ANTHROPIC_API_KEY\s*=\s*[a-zA-Z0-9_-]{20,}/gi
+                ],
+                github_tokens: [
+                    /ghp_[a-zA-Z0-9]{36}/gi,
+                    /gho_[a-zA-Z0-9]{36}/gi,
+                    /ghu_[a-zA-Z0-9]{36}/gi,
+                    /ghs_[a-zA-Z0-9]{36}/gi,
+                    /GITHUB_TOKEN\s*=\s*gh[a-z]_[a-zA-Z0-9]{36}/gi
+                ],
+                database_urls: [
+                    /DATABASE_URL\s*=\s*[a-zA-Z]+:\/\/[^\s]+/gi,
+                    /mongodb:\/\/[^\s]+/gi,
+                    /postgres:\/\/[^\s]+/gi,
+                    /mysql:\/\/[^\s]+/gi
+                ],
+                private_keys: [
+                    /-----BEGIN\s+(RSA\s+)?PRIVATE\s+KEY-----/gi,
+                    /PRIVATE_KEY\s*=\s*[A-Za-z0-9+/=\n\r-]{50,}/gi
+                ],
+                jwt_secrets: [
+                    /JWT_SECRET\s*=\s*[a-zA-Z0-9_-]{20,}/gi,
+                    /SECRET_KEY\s*=\s*[a-zA-Z0-9_-]{20,}/gi
+                ]
             };
         }
     }
@@ -128,66 +157,35 @@ class SecretsScanner {
         const cwd = process.cwd();
         
         try {
-            // Check for common secret files
-            const secretFiles = [
-                '.env', '.env.local', '.env.production',
-                'credentials', 'secrets.json', 'config.json',
-                '.aws/credentials', '.ssh/id_rsa'
-            ];
+            // Get all files in current directory
+            const allFiles = this.getAllFiles(cwd);
+            debugLog(`Scanning ${allFiles.length} files in working directory`);
             
-            for (const file of secretFiles) {
+            // Scan all files for secrets
+            for (const file of allFiles) {
                 const filePath = path.join(cwd, file);
-                if (fs.existsSync(filePath)) {
-                    try {
-                        const stats = fs.statSync(filePath);
-                        if (stats.isFile() && stats.size > 0) {
-                            // Read first 1000 bytes to check for secrets
-                            const content = fs.readFileSync(filePath, { encoding: 'utf8', flag: 'r' })
-                                .substring(0, 1000);
-                            const findings = this.scanContent(content);
-                            if (findings.length > 0) {
-                                warnings.push({
-                                    type: 'file',
-                                    path: file,
-                                    secrets: findings.length,
-                                    types: [...new Set(findings.map(f => f.type))]
-                                });
-                            }
+                try {
+                    const stats = fs.statSync(filePath);
+                    if (stats.isFile() && stats.size > 0 && stats.size < 1024 * 1024) { // Skip files > 1MB
+                        const content = fs.readFileSync(filePath, { encoding: 'utf8', flag: 'r' });
+                        const findings = this.scanContent(content);
+                        if (findings.length > 0) {
+                            warnings.push({
+                                type: 'file',
+                                path: file,
+                                secrets: findings.length,
+                                types: [...new Set(findings.map(f => f.type))],
+                                isGitIgnored: this.isFileGitIgnored(file, cwd)
+                            });
                         }
-                    } catch (e) {
-                        debugLog(`Error scanning ${file}: ${e.message}`);
                     }
+                } catch (e) {
+                    debugLog(`Error scanning ${file}: ${e.message}`);
                 }
             }
             
-            // Check git status for untracked secret files
-            try {
-                const gitStatus = execSync('git status --porcelain 2>/dev/null', { 
-                    cwd, 
-                    encoding: 'utf8',
-                    timeout: 2000 
-                });
-                
-                const untrackedSecretFiles = gitStatus.split('\n')
-                    .filter(line => line.startsWith('??'))
-                    .map(line => line.substring(3).trim())
-                    .filter(file => 
-                        file.includes('.env') || 
-                        file.includes('secret') || 
-                        file.includes('credential') ||
-                        file.includes('key')
-                    );
-                
-                if (untrackedSecretFiles.length > 0) {
-                    warnings.push({
-                        type: 'git',
-                        message: `${untrackedSecretFiles.length} untracked files may contain secrets`,
-                        files: untrackedSecretFiles.slice(0, 3)
-                    });
-                }
-            } catch (e) {
-                // Not a git repo or git not available
-            }
+            // Check git staged files if in git repo
+            this.scanGitStagedFiles(cwd, warnings);
             
         } catch (e) {
             debugLog(`Error scanning working directory: ${e.message}`);
@@ -195,70 +193,130 @@ class SecretsScanner {
         
         return warnings;
     }
+
+    getAllFiles(dir) {
+        const files = [];
+        try {
+            const items = fs.readdirSync(dir);
+            for (const item of items) {
+                // Skip hidden files EXCEPT .env files
+                if (item.startsWith('.') && !item.includes('.env')) {
+                    continue;
+                }
+                if (item === 'node_modules' || item === '.git') {
+                    continue;
+                }
+                
+                const fullPath = path.join(dir, item);
+                try {
+                    const stats = fs.statSync(fullPath);
+                    if (stats.isFile()) {
+                        files.push(item);
+                    }
+                } catch (e) {
+                    // Skip files we can't stat
+                }
+            }
+        } catch (e) {
+            debugLog(`Error reading directory ${dir}: ${e.message}`);
+        }
+        return files;
+    }
+
+    isFileGitIgnored(file, cwd) {
+        try {
+            execSync(`git check-ignore "${file}" 2>/dev/null`, { 
+                cwd, 
+                timeout: 1000,
+                stdio: 'pipe'
+            });
+            return true; // If no error, file is ignored
+        } catch (e) {
+            return false; // If error, file is not ignored
+        }
+    }
+
+    scanGitStagedFiles(cwd, warnings) {
+        try {
+            // Check if we're in a git repository
+            execSync('git rev-parse --git-dir 2>/dev/null', { cwd, timeout: 1000, stdio: 'pipe' });
+            
+            // Get staged files
+            const stagedFiles = execSync('git ls-files --cached 2>/dev/null', { 
+                cwd, 
+                encoding: 'utf8',
+                timeout: 2000 
+            }).split('\n').filter(f => f.trim());
+            
+            debugLog(`Found ${stagedFiles.length} staged files`);
+            
+            const exposedSecrets = [];
+            for (const file of stagedFiles) {
+                const filePath = path.join(cwd, file);
+                try {
+                    if (fs.existsSync(filePath)) {
+                        const stats = fs.statSync(filePath);
+                        if (stats.isFile() && stats.size > 0 && stats.size < 1024 * 1024) {
+                            const content = fs.readFileSync(filePath, { encoding: 'utf8', flag: 'r' });
+                            const findings = this.scanContent(content);
+                            if (findings.length > 0 && !this.isFileGitIgnored(file, cwd)) {
+                                exposedSecrets.push({
+                                    file,
+                                    secrets: findings.length,
+                                    types: [...new Set(findings.map(f => f.type))]
+                                });
+                            }
+                        }
+                    }
+                } catch (e) {
+                    debugLog(`Error scanning staged file ${file}: ${e.message}`);
+                }
+            }
+            
+            if (exposedSecrets.length > 0) {
+                warnings.push({
+                    type: 'git-staged',
+                    message: `${exposedSecrets.length} staged files contain secrets that aren't gitignored`,
+                    files: exposedSecrets
+                });
+            }
+            
+        } catch (e) {
+            debugLog(`Not a git repo or git error: ${e.message}`);
+        }
+    }
 }
 
 function formatSecurityReport(sessionType, envWarnings, fileWarnings) {
-    const icon = '🛡️';
-    let message = `\n${colors.cyan}${colors.bright}${icon} Guardian Security Check${colors.reset}\n`;
-    message += `${colors.dim}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${colors.reset}\n\n`;
-    
-    // Session type message
-    if (sessionType === 'new') {
-        message += `${colors.green}Starting new session with security protection${colors.reset}\n`;
-    } else if (sessionType === 'resumed') {
-        message += `${colors.green}Resuming session with security protection${colors.reset}\n`;
-    } else if (sessionType === 'cleared') {
-        message += `${colors.green}Session cleared with security protection${colors.reset}\n`;
-    }
-    
-    // Security scan results
     const totalWarnings = envWarnings.length + fileWarnings.length;
     
+    // If no warnings, show minimal message
     if (totalWarnings === 0) {
-        message += `${colors.green}✓ No exposed secrets detected${colors.reset}\n\n`;
-    } else {
-        message += `\n${colors.red}${colors.bright}⚠️  Security Warnings (${totalWarnings} issues)${colors.reset}\n\n`;
-        
-        // Environment warnings
-        if (envWarnings.length > 0) {
-            message += `${colors.yellow}Environment Variables:${colors.reset}\n`;
-            envWarnings.forEach(w => {
-                message += `  ${colors.red}•${colors.reset} ${w.variable} = ${w.preview}\n`;
-            });
-            message += `\n`;
-        }
-        
-        // File warnings
-        if (fileWarnings.length > 0) {
-            message += `${colors.yellow}Files with Secrets:${colors.reset}\n`;
-            fileWarnings.forEach(w => {
-                if (w.type === 'file') {
-                    message += `  ${colors.red}•${colors.reset} ${w.path}: ${w.secrets} secret(s) [${w.types.join(', ')}]\n`;
-                } else if (w.type === 'git') {
-                    message += `  ${colors.red}•${colors.reset} ${w.message}\n`;
-                    w.files.forEach(f => {
-                        message += `    - ${f}\n`;
-                    });
-                }
-            });
-            message += `\n`;
-        }
-        
-        message += `${colors.yellow}${colors.bright}Recommendations:${colors.reset}\n`;
-        message += `  1. Remove hardcoded secrets from files\n`;
-        message += `  2. Add secret files to .gitignore\n`;
-        message += `  3. Use environment variables or secret managers\n`;
-        message += `  4. Clear sensitive environment variables\n\n`;
+        return `${colors.cyan}🛡️ Guardian: ${colors.green}Session protected, no secrets detected${colors.reset}\n`;
     }
     
-    // Active protection features
-    message += `${colors.blue}Active Protection:${colors.reset}\n`;
-    message += `  ${colors.green}✓${colors.reset} Blocking writes with secrets\n`;
-    message += `  ${colors.green}✓${colors.reset} Scanning commands before execution\n`;
-    message += `  ${colors.green}✓${colors.reset} Filtering Claude's responses\n`;
-    message += `  ${colors.green}✓${colors.reset} Monitoring file operations\n`;
+    // Concise warning format
+    let message = `${colors.red}🚨 Guardian Warning: ${totalWarnings} security issue(s) detected${colors.reset}\n`;
     
-    message += `\n${colors.dim}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${colors.reset}\n`;
+    // Environment warnings - concise
+    if (envWarnings.length > 0) {
+        message += `${colors.yellow}Environment:${colors.reset} ${envWarnings.map(w => w.variable).join(', ')}\n`;
+    }
+    
+    // File warnings - concise
+    const exposedFiles = fileWarnings.filter(w => w.type === 'file' && !w.isGitIgnored);
+    const stagedFiles = fileWarnings.filter(w => w.type === 'git-staged');
+    
+    if (exposedFiles.length > 0) {
+        message += `${colors.red}Exposed files:${colors.reset} ${exposedFiles.map(w => w.path).join(', ')}\n`;
+    }
+    
+    if (stagedFiles.length > 0) {
+        const files = stagedFiles[0].files.map(f => f.file).join(', ');
+        message += `${colors.red}Staged secrets:${colors.reset} ${files}\n`;
+    }
+    
+    message += `${colors.yellow}Fix:${colors.reset} Add to .gitignore or remove secrets\n`;
     
     return message;
 }

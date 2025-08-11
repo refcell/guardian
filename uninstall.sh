@@ -19,7 +19,7 @@ echo
 
 # Check if the hook is installed (check all possible locations)
 HOOK_INSTALLED=false
-if [ -f "$HOOKS_DIR/guardian-hook.js" ] || [ -f "$HOOKS_DIR/secure-command.js" ] || [ -f "$HOOKS_DIR/guardian-wrapper.sh" ] || [ -f "$HOOKS_DIR/secrets-guardian.json" ]; then
+if [ -f "$HOOKS_DIR/guardian-hook.js" ] || [ -f "$HOOKS_DIR/session-start-hook.js" ] || [ -f "$HOOKS_DIR/secure-command.js" ] || [ -f "$HOOKS_DIR/guardian-wrapper.sh" ] || [ -f "$HOOKS_DIR/secrets-guardian.json" ]; then
     HOOK_INSTALLED=true
 fi
 
@@ -73,6 +73,12 @@ if [ -f "$HOOKS_DIR/secrets-guardian.json" ]; then
     echo -e "${YELLOW}Removing configuration...${NC}"
     rm -f "$HOOKS_DIR/secrets-guardian.json"
     echo -e "${GREEN}✅ Configuration removed${NC}"
+fi
+
+if [ -f "$HOOKS_DIR/session-start-hook.js" ]; then
+    echo -e "${YELLOW}Removing session start hook...${NC}"
+    rm -f "$HOOKS_DIR/session-start-hook.js"
+    echo -e "${GREEN}✅ Session start hook removed${NC}"
 fi
 
 # Update settings.json if it exists
@@ -137,6 +143,62 @@ if [ -f "$SETTINGS_FILE" ]; then
                 }
             }
             
+            // Remove guardian hook entries from SessionStart event
+            if (settings.hooks && settings.hooks.SessionStart) {
+                if (Array.isArray(settings.hooks.SessionStart)) {
+                    settings.hooks.SessionStart = settings.hooks.SessionStart.filter(h => 
+                        !h.hooks || !h.hooks[0] || !h.hooks[0].command || 
+                        !h.hooks[0].command.includes('session-start-hook.js')
+                    );
+                    
+                    if (settings.hooks.SessionStart.length === 0) {
+                        delete settings.hooks.SessionStart;
+                    }
+                }
+            }
+            
+            // Remove guardian hook entries from UserPromptSubmit event
+            if (settings.hooks && settings.hooks.UserPromptSubmit) {
+                if (Array.isArray(settings.hooks.UserPromptSubmit)) {
+                    settings.hooks.UserPromptSubmit = settings.hooks.UserPromptSubmit.filter(h => 
+                        !h.hooks || !h.hooks[0] || !h.hooks[0].command || 
+                        !h.hooks[0].command.includes('guardian-hook.js')
+                    );
+                    
+                    if (settings.hooks.UserPromptSubmit.length === 0) {
+                        delete settings.hooks.UserPromptSubmit;
+                    }
+                }
+            }
+            
+            // Remove guardian hook entries from SubagentStop event
+            if (settings.hooks && settings.hooks.SubagentStop) {
+                if (Array.isArray(settings.hooks.SubagentStop)) {
+                    settings.hooks.SubagentStop = settings.hooks.SubagentStop.filter(h => 
+                        !h.hooks || !h.hooks[0] || !h.hooks[0].command || 
+                        !h.hooks[0].command.includes('guardian-hook.js')
+                    );
+                    
+                    if (settings.hooks.SubagentStop.length === 0) {
+                        delete settings.hooks.SubagentStop;
+                    }
+                }
+            }
+            
+            // Remove guardian hook entries from PostToolUse event (if debug was enabled)
+            if (settings.hooks && settings.hooks.PostToolUse) {
+                if (Array.isArray(settings.hooks.PostToolUse)) {
+                    settings.hooks.PostToolUse = settings.hooks.PostToolUse.filter(h => 
+                        !h.hooks || !h.hooks[0] || !h.hooks[0].command || 
+                        !h.hooks[0].command.includes('guardian-hook.js')
+                    );
+                    
+                    if (settings.hooks.PostToolUse.length === 0) {
+                        delete settings.hooks.PostToolUse;
+                    }
+                }
+            }
+            
             // Remove empty hooks object
             if (settings.hooks && Object.keys(settings.hooks).length === 0) {
                 delete settings.hooks;
@@ -161,11 +223,13 @@ if [ -f "$SETTINGS_FILE" ]; then
         echo -e "${YELLOW}⚠️  Node.js not found. Please manually remove hook entries from:${NC}"
         echo "   $SETTINGS_FILE"
         echo
-        echo "   Remove these entries from hooks.PreToolUse:"
-        echo '   - Entries containing "guardian-hook.js"'
-        echo '   - Entries containing "guardian-wrapper.sh"'
-        echo '   - Entries containing "secure-command.js"'
-        echo "   Also remove guardian entries from hooks.Stop"
+        echo "   Remove these entries from hooks sections:"
+        echo '   - PreToolUse: Entries containing "guardian-hook.js"'
+        echo '   - Stop: Entries containing "guardian-hook.js"'
+        echo '   - SessionStart: Entries containing "session-start-hook.js"'
+        echo '   - UserPromptSubmit: Entries containing "guardian-hook.js"'
+        echo '   - SubagentStop: Entries containing "guardian-hook.js"'
+        echo '   - PostToolUse: Entries containing "guardian-hook.js" (if present)'
     fi
 fi
 

@@ -294,28 +294,34 @@ class SecretsScanner {
 }
 
 function formatSecurityReport(sessionType, envWarnings, fileWarnings) {
-    const allSecrets = [];
+    // Group secrets by location
+    const secretsByLocation = {};
+    let totalSecrets = 0;
     
     // Collect environment secrets
-    for (const warning of envWarnings) {
-        allSecrets.push({
-            type: formatSecretType(warning.variable),
-            preview: warning.preview,
-            location: 'environment'
-        });
+    if (envWarnings.length > 0) {
+        secretsByLocation['environment'] = {
+            count: envWarnings.length,
+            types: new Set(envWarnings.map(w => formatSecretType(w.variable || 'environment')))
+        };
+        totalSecrets += envWarnings.length;
     }
     
-    // Collect file secrets
+    // Collect file secrets (only non-gitignored files)
     const exposedFiles = fileWarnings.filter(w => w.type === 'file' && !w.isGitIgnored);
     for (const file of exposedFiles) {
-        if (file.findings) {
-            for (const finding of file.findings) {
-                allSecrets.push({
-                    type: formatSecretType(finding.type),
-                    preview: finding.preview,
-                    location: file.path
-                });
+        if (file.findings && file.findings.length > 0) {
+            if (!secretsByLocation[file.path]) {
+                secretsByLocation[file.path] = {
+                    count: 0,
+                    types: new Set()
+                };
             }
+            secretsByLocation[file.path].count += file.findings.length;
+            for (const finding of file.findings) {
+                secretsByLocation[file.path].types.add(formatSecretType(finding.type));
+            }
+            totalSecrets += file.findings.length;
         }
     }
     
@@ -324,33 +330,49 @@ function formatSecurityReport(sessionType, envWarnings, fileWarnings) {
     for (const staged of stagedFiles) {
         if (staged.files) {
             for (const file of staged.files) {
-                if (file.findings) {
-                    for (const finding of file.findings) {
-                        allSecrets.push({
-                            type: formatSecretType(finding.type),
-                            preview: finding.preview,
-                            location: file.file
-                        });
+                if (file.findings && file.findings.length > 0) {
+                    const location = `${file.file} (staged)`;
+                    if (!secretsByLocation[location]) {
+                        secretsByLocation[location] = {
+                            count: 0,
+                            types: new Set()
+                        };
                     }
+                    secretsByLocation[location].count += file.findings.length;
+                    for (const finding of file.findings) {
+                        secretsByLocation[location].types.add(formatSecretType(finding.type));
+                    }
+                    totalSecrets += file.findings.length;
                 }
             }
         }
     }
     
     // If no secrets, show minimal message
-    if (allSecrets.length === 0) {
+    if (totalSecrets === 0) {
         return `${colors.cyan}🛡️ Guardian: ${colors.green}Session protected, no secrets detected${colors.reset}\n`;
     }
     
-    // Format concise warning with actual secrets
-    let message = `${colors.red}🚨 ${allSecrets.length} secret${allSecrets.length === 1 ? '' : 's'} detected:${colors.reset}\n`;
+    // Format concise warning grouped by file
+    let message = `${colors.red}🚨 ${totalSecrets} secret${totalSecrets === 1 ? '' : 's'} in ${Object.keys(secretsByLocation).length} location${Object.keys(secretsByLocation).length === 1 ? '' : 's'}:${colors.reset}\n\n`;
     
-    // Show each secret with type, preview, and location
-    for (const secret of allSecrets) {
-        message += `${colors.red}•${colors.reset} ${secret.type} (${colors.dim}${secret.preview}${colors.reset}) in ${colors.yellow}${secret.location}${colors.reset}\n`;
+    // Show up to 5 files with most secrets
+    const sortedLocations = Object.entries(secretsByLocation)
+        .sort((a, b) => b[1].count - a[1].count)
+        .slice(0, 5);
+    
+    for (const [location, info] of sortedLocations) {
+        const typesList = Array.from(info.types).slice(0, 3).join(', ');
+        const moreTypes = info.types.size > 3 ? `, +${info.types.size - 3}` : '';
+        message += `  ${colors.yellow}${location}${colors.reset}: ${info.count} secret${info.count === 1 ? '' : 's'} (${typesList}${moreTypes})\n`;
     }
     
-    message += `${colors.yellow}Fix:${colors.reset} Add files to .gitignore or use environment variables\n`;
+    if (Object.keys(secretsByLocation).length > 5) {
+        const remaining = Object.keys(secretsByLocation).length - 5;
+        message += `\n  ${colors.dim}... and ${remaining} more file${remaining === 1 ? '' : 's'}${colors.reset}\n`;
+    }
+    
+    message += `\n${colors.yellow}Fix:${colors.reset} Add files to .gitignore or use environment variables\n`;
     
     return message;
 }

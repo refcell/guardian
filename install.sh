@@ -48,10 +48,34 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
+# Verify the downloaded file is valid JavaScript (not HTML error page)
+if head -n 1 "$HOOKS_DIR/guardian-hook.js" | grep -q "404" || head -n 1 "$HOOKS_DIR/guardian-hook.js" | grep -q "<" ; then
+    echo -e "${RED}Error: Downloaded file appears to be an error page, not JavaScript${NC}"
+    echo -e "${YELLOW}Attempting alternative download method...${NC}"
+    # Try alternative download
+    curl -L "https://github.com/${GITHUB_REPO}/raw/main/hooks/guardian-hook.js" -o "$HOOKS_DIR/guardian-hook.js"
+    if [ $? -ne 0 ] || head -n 1 "$HOOKS_DIR/guardian-hook.js" | grep -q "404" || head -n 1 "$HOOKS_DIR/guardian-hook.js" | grep -q "<" ; then
+        echo -e "${RED}Failed to download valid guardian-hook.js file${NC}"
+        exit 1
+    fi
+fi
+
+# Verify it starts with shebang or comment
+if ! head -n 1 "$HOOKS_DIR/guardian-hook.js" | grep -q "^#\|^/\*" ; then
+    echo -e "${RED}Error: Downloaded file does not appear to be valid JavaScript${NC}"
+    exit 1
+fi
+
 # Download the agent configuration  
 curl -sSL "${GITHUB_RAW_URL}/agents/secrets-guardian.json" -o "$HOOKS_DIR/secrets-guardian.json"
 if [ $? -ne 0 ]; then
     echo -e "${RED}Failed to download secrets-guardian.json${NC}"
+    exit 1
+fi
+
+# Verify the config file is valid JSON
+if ! python3 -m json.tool "$HOOKS_DIR/secrets-guardian.json" > /dev/null 2>&1 && ! node -e "JSON.parse(require('fs').readFileSync('$HOOKS_DIR/secrets-guardian.json'))" > /dev/null 2>&1 ; then
+    echo -e "${RED}Error: Downloaded configuration file is not valid JSON${NC}"
     exit 1
 fi
 
@@ -98,6 +122,26 @@ if [ -f "$SETTINGS_FILE" ]; then
         }]
     });
     
+    // Add Stop hook to scan final responses
+    if (!settings.hooks.Stop) {
+        settings.hooks.Stop = [];
+    }
+    
+    // Remove existing guardian Stop hooks if present
+    settings.hooks.Stop = settings.hooks.Stop.filter(h => 
+        !h.hooks || !h.hooks[0] || !h.hooks[0].command || 
+        !h.hooks[0].command.includes('guardian-hook.js')
+    );
+    
+    // Add guardian hook for Stop event (matches all)
+    settings.hooks.Stop.push({
+        matcher: '.*',
+        hooks: [{
+            type: 'command',
+            command: '$HOOKS_DIR/guardian-hook.js'
+        }]
+    });
+    
     fs.writeFileSync('$SETTINGS_FILE', JSON.stringify(settings, null, 2));
     "
 else
@@ -108,6 +152,17 @@ else
     "PreToolUse": [
       {
         "matcher": "Write|Edit|MultiEdit|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOOKS_DIR/guardian-hook.js"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": ".*",
         "hooks": [
           {
             "type": "command",
@@ -151,11 +206,14 @@ echo -e "${BLUE}Installation Summary:${NC}"
 echo "  • Hooks installed to: $HOOKS_DIR"
 echo "  • Settings updated at: $SETTINGS_FILE"
 echo
-echo -e "${YELLOW}Configured hooks (PreToolUse):${NC}"
-echo "  • Write: Scans content before writing files"
-echo "  • Edit: Scans content before editing files"
-echo "  • MultiEdit: Scans content before multi-editing files"
-echo "  • Bash: Scans commands before execution"
+echo -e "${YELLOW}Configured hooks:${NC}"
+echo "  ${BLUE}PreToolUse:${NC}"
+echo "    • Write: Scans content before writing files"
+echo "    • Edit: Scans content before editing files"
+echo "    • MultiEdit: Scans content before multi-editing files"
+echo "    • Bash: Scans commands before execution"
+echo "  ${BLUE}Stop:${NC}"
+echo "    • Scans Claude's final response for any exposed secrets"
 echo
 echo -e "${GREEN}The secrets guardian is now active and will block any attempts to expose secrets!${NC}"
 echo

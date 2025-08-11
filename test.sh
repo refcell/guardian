@@ -16,7 +16,7 @@ echo -e "${BLUE}=== Claude Secrets Guardian Hook Test Suite ===${NC}"
 echo
 
 # Check if hook is installed
-if [ ! -f "$HOOKS_DIR/secure-command.js" ] && [ ! -f "$HOOKS_DIR/guardian-wrapper.sh" ]; then
+if [ ! -f "$HOOKS_DIR/guardian-hook.js" ] && [ ! -f "$HOOKS_DIR/secure-command.js" ] && [ ! -f "$HOOKS_DIR/guardian-wrapper.sh" ]; then
     echo -e "${RED}❌ Error: Hook not installed in $HOOKS_DIR${NC}"
     echo -e "${YELLOW}Please run the installer first:${NC}"
     echo "  curl -sSL guardian.refcell.org/install | bash"
@@ -58,9 +58,18 @@ for test_case in "${secret_tests[@]}"; do
     
     echo -n "• Testing ${description}: "
     
-    # Run the test
-    result=$(echo "$secret" | node "$HOOKS_DIR/secure-command.js" 2>&1)
-    status=$?
+    # Run the test - try guardian-hook.js first, then fall back to secure-command.js
+    if [ -f "$HOOKS_DIR/guardian-hook.js" ]; then
+        test_input='{"toolName":"Write","toolInput":{"content":"'"$secret"'"}}'  
+        result=$(echo "$test_input" | node "$HOOKS_DIR/guardian-hook.js" 2>&1)
+        status=$?
+    elif [ -f "$HOOKS_DIR/secure-command.js" ]; then
+        result=$(echo "$secret" | node "$HOOKS_DIR/secure-command.js" 2>&1)
+        status=$?
+    else
+        echo -e "${RED}❌ No hook script found${NC}"
+        exit 1
+    fi
     
     # Extract JSON status if available
     json_status=$(echo "$result" | grep -o '"status":\s*"[^"]*"' | sed 's/.*"\([^"]*\)"$/\1/' 2>/dev/null)
@@ -93,9 +102,18 @@ for test_case in "${safe_tests[@]}"; do
     
     echo -n "• Testing ${description}: "
     
-    # Run the test
-    result=$(echo -e "$content" | node "$HOOKS_DIR/secure-command.js" 2>&1)
-    status=$?
+    # Run the test - try guardian-hook.js first, then fall back to secure-command.js
+    if [ -f "$HOOKS_DIR/guardian-hook.js" ]; then
+        test_input='{"toolName":"Write","toolInput":{"content":"'"$content"'"}}'  
+        result=$(echo "$test_input" | node "$HOOKS_DIR/guardian-hook.js" 2>&1)
+        status=$?
+    elif [ -f "$HOOKS_DIR/secure-command.js" ]; then
+        result=$(echo -e "$content" | node "$HOOKS_DIR/secure-command.js" 2>&1)
+        status=$?
+    else
+        echo -e "${RED}❌ No hook script found${NC}"
+        exit 1
+    fi
     
     # Extract JSON status if available
     json_status=$(echo "$result" | grep -o '"status":\s*"[^"]*"' | sed 's/.*"\([^"]*\)"$/\1/' 2>/dev/null)
@@ -119,13 +137,18 @@ if [ -f "$SETTINGS_FILE" ]; then
     echo -e "${GREEN}✅ Settings file exists${NC}"
     
     # Check for PreToolUse hook configurations
-    for tool in "Write" "Edit" "MultiEdit" "Bash"; do
-        if grep -q "\"$tool\".*guardian-wrapper.sh" "$SETTINGS_FILE"; then
-            echo -e "${GREEN}✅ PreToolUse.$tool configured${NC}"
-        else
-            echo -e "${YELLOW}⚠️  PreToolUse.$tool not configured${NC}"
-        fi
-    done
+    if grep -q '"PreToolUse"' "$SETTINGS_FILE" && grep -q "guardian-hook.js" "$SETTINGS_FILE"; then
+        echo -e "${GREEN}✅ PreToolUse hooks configured${NC}"
+    else
+        echo -e "${YELLOW}⚠️  PreToolUse hooks not configured${NC}"
+    fi
+    
+    # Check for Stop hook configuration
+    if grep -q '"Stop"' "$SETTINGS_FILE" && grep -A 20 '"Stop"' "$SETTINGS_FILE" | grep -q "guardian-hook.js"; then
+        echo -e "${GREEN}✅ Stop hook configured${NC}"
+    else
+        echo -e "${YELLOW}⚠️  Stop hook not configured${NC}"
+    fi
 else
     echo -e "${RED}❌ Settings file not found at $SETTINGS_FILE${NC}"
 fi

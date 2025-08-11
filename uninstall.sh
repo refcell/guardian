@@ -17,8 +17,18 @@ SETTINGS_FILE="$CLAUDE_CONFIG_DIR/settings.json"
 echo -e "${BLUE}=== Claude Secrets Guardian Uninstaller ===${NC}"
 echo
 
-# Check if the hook is installed
-if [ ! -f "$HOOKS_DIR/guardian-hook.js" ] && [ ! -f "$HOOKS_DIR/secure-command.js" ] && [ ! -f "$HOOKS_DIR/guardian-wrapper.sh" ]; then
+# Check if the hook is installed (check all possible locations)
+HOOK_INSTALLED=false
+if [ -f "$HOOKS_DIR/guardian-hook.js" ] || [ -f "$HOOKS_DIR/secure-command.js" ] || [ -f "$HOOKS_DIR/guardian-wrapper.sh" ] || [ -f "$HOOKS_DIR/secrets-guardian.json" ]; then
+    HOOK_INSTALLED=true
+fi
+
+# Also check if there are guardian entries in settings.json
+if [ -f "$SETTINGS_FILE" ] && grep -q "guardian" "$SETTINGS_FILE" 2>/dev/null; then
+    HOOK_INSTALLED=true
+fi
+
+if [ "$HOOK_INSTALLED" = false ]; then
     echo -e "${YELLOW}Guardian hook is not installed.${NC}"
     exit 0
 fi
@@ -86,7 +96,8 @@ if [ -f "$SETTINGS_FILE" ]; then
                     settings.hooks.PreToolUse = settings.hooks.PreToolUse.filter(h => 
                         !h.hooks || !h.hooks[0] || !h.hooks[0].command || 
                         (!h.hooks[0].command.includes('guardian-hook.js') &&
-                         !h.hooks[0].command.includes('guardian-wrapper.sh'))
+                         !h.hooks[0].command.includes('guardian-wrapper.sh') &&
+                         !h.hooks[0].command.includes('secure-command.js'))
                     );
                     
                     if (settings.hooks.PreToolUse.length === 0) {
@@ -97,7 +108,9 @@ if [ -f "$SETTINGS_FILE" ]; then
                     const toolsToClean = ['Write', 'Edit', 'MultiEdit', 'Bash'];
                     toolsToClean.forEach(tool => {
                         if (settings.hooks.PreToolUse[tool] && 
-                            settings.hooks.PreToolUse[tool].includes('guardian-wrapper.sh')) {
+                            (settings.hooks.PreToolUse[tool].includes('guardian-wrapper.sh') ||
+                             settings.hooks.PreToolUse[tool].includes('guardian-hook.js') ||
+                             settings.hooks.PreToolUse[tool].includes('secure-command.js'))) {
                             delete settings.hooks.PreToolUse[tool];
                         }
                     });
@@ -106,11 +119,27 @@ if [ -f "$SETTINGS_FILE" ]; then
                         delete settings.hooks.PreToolUse;
                     }
                 }
-                
-                // Remove empty hooks object
-                if (Object.keys(settings.hooks).length === 0) {
-                    delete settings.hooks;
+            }
+            
+            // Remove guardian hook entries from Stop event
+            if (settings.hooks && settings.hooks.Stop) {
+                if (Array.isArray(settings.hooks.Stop)) {
+                    settings.hooks.Stop = settings.hooks.Stop.filter(h => 
+                        !h.hooks || !h.hooks[0] || !h.hooks[0].command || 
+                        (!h.hooks[0].command.includes('guardian-hook.js') &&
+                         !h.hooks[0].command.includes('guardian-wrapper.sh') &&
+                         !h.hooks[0].command.includes('secure-command.js'))
+                    );
+                    
+                    if (settings.hooks.Stop.length === 0) {
+                        delete settings.hooks.Stop;
+                    }
                 }
+            }
+            
+            // Remove empty hooks object
+            if (settings.hooks && Object.keys(settings.hooks).length === 0) {
+                delete settings.hooks;
             }
             
             fs.writeFileSync('$SETTINGS_FILE', JSON.stringify(settings, null, 2));
@@ -133,10 +162,10 @@ if [ -f "$SETTINGS_FILE" ]; then
         echo "   $SETTINGS_FILE"
         echo
         echo "   Remove these entries from hooks.PreToolUse:"
-        echo '   - Write: containing "guardian-wrapper.sh"'
-        echo '   - Edit: containing "guardian-wrapper.sh"'
-        echo '   - MultiEdit: containing "guardian-wrapper.sh"'
-        echo '   - Bash: containing "guardian-wrapper.sh"'
+        echo '   - Entries containing "guardian-hook.js"'
+        echo '   - Entries containing "guardian-wrapper.sh"'
+        echo '   - Entries containing "secure-command.js"'
+        echo "   Also remove guardian entries from hooks.Stop"
     fi
 fi
 

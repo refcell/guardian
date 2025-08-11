@@ -4,12 +4,18 @@
  * Guardian Hook for Claude Code
  * 
  * This hook integrates with Claude Code's hook system to scan for secrets
- * in tool inputs before they are executed.
+ * in tool inputs before they are executed and in responses before they're finalized.
  * 
- * Claude Code sends JSON data to stdin with the following structure:
+ * For PreToolUse events, Claude Code sends:
  * {
  *   "toolName": "Write|Edit|Bash|etc",
  *   "toolInput": { ... tool specific parameters ... }
+ * }
+ * 
+ * For Stop events, Claude Code sends:
+ * {
+ *   "messages": [...],
+ *   "modelUsage": {...}
  * }
  */
 
@@ -87,30 +93,50 @@ function processClaudeHookInput(input) {
   
   try {
     const data = JSON.parse(input);
-    const { toolName, toolInput } = data;
     
-    // Extract content to scan based on tool type
+    // Check if this is a Stop event (has messages field) or PreToolUse event (has toolName)
     let contentToScan = '';
     
-    switch (toolName) {
-      case 'Write':
-        contentToScan = toolInput.content || '';
-        break;
-      case 'Edit':
-      case 'MultiEdit':
-        if (toolInput.new_string) {
-          contentToScan = toolInput.new_string;
-        } else if (toolInput.edits) {
-          // For MultiEdit, scan all new_string values
-          contentToScan = toolInput.edits.map(e => e.new_string || '').join('\n');
+    if (data.messages) {
+      // Stop event - scan all assistant messages
+      const assistantMessages = data.messages.filter(m => m.role === 'assistant');
+      contentToScan = assistantMessages.map(m => {
+        if (typeof m.content === 'string') {
+          return m.content;
+        } else if (Array.isArray(m.content)) {
+          // Handle structured content
+          return m.content.map(c => c.text || '').join('\n');
         }
-        break;
-      case 'Bash':
-        contentToScan = toolInput.command || '';
-        break;
-      default:
-        // For other tools, scan the entire input
-        contentToScan = JSON.stringify(toolInput);
+        return '';
+      }).join('\n');
+      
+    } else if (data.toolName && data.toolInput) {
+      // PreToolUse event - scan based on tool type
+      const { toolName, toolInput } = data;
+      
+      switch (toolName) {
+        case 'Write':
+          contentToScan = toolInput.content || '';
+          break;
+        case 'Edit':
+        case 'MultiEdit':
+          if (toolInput.new_string) {
+            contentToScan = toolInput.new_string;
+          } else if (toolInput.edits) {
+            // For MultiEdit, scan all new_string values
+            contentToScan = toolInput.edits.map(e => e.new_string || '').join('\n');
+          }
+          break;
+        case 'Bash':
+          contentToScan = toolInput.command || '';
+          break;
+        default:
+          // For other tools, scan the entire input
+          contentToScan = JSON.stringify(toolInput);
+      }
+    } else {
+      // Unknown format, scan everything
+      contentToScan = JSON.stringify(data);
     }
     
     const result = guardian.scanContent(contentToScan);

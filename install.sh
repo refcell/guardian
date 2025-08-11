@@ -64,6 +64,19 @@ else
     fi
 fi
 
+# Verify the session hook is valid JavaScript
+if [ -f "$HOOKS_DIR/session-start-hook.js" ]; then
+    if head -n 1 "$HOOKS_DIR/session-start-hook.js" | grep -q "404" || head -n 1 "$HOOKS_DIR/session-start-hook.js" | grep -q "<" ; then
+        echo -e "${RED}Error: Session hook download failed (404 or HTML error page)${NC}"
+        echo -e "${YELLOW}Attempting alternative download...${NC}"
+        curl -L "https://github.com/${GITHUB_REPO}/raw/main/hooks/session-start-hook.js" -o "$HOOKS_DIR/session-start-hook.js"
+        if [ $? -ne 0 ] || head -n 1 "$HOOKS_DIR/session-start-hook.js" | grep -q "404" || head -n 1 "$HOOKS_DIR/session-start-hook.js" | grep -q "<" ; then
+            echo -e "${RED}Failed to download valid session-start-hook.js file${NC}"
+            exit 1
+        fi
+    fi
+fi
+
 # Verify the downloaded file is valid JavaScript (not HTML error page)
 if head -n 1 "$HOOKS_DIR/guardian-hook.js" | grep -q "404" || head -n 1 "$HOOKS_DIR/guardian-hook.js" | grep -q "<" ; then
     echo -e "${RED}Error: Downloaded file appears to be an error page, not JavaScript${NC}"

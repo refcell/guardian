@@ -7,7 +7,7 @@
     },
     {
       "source": "/test.sh",
-      "destination": "https://raw.githubusercontent.com/refcell/guardian/main/test.sh",
+      "destination": "https://raw.githubusercontent.com/refcell/guardian/main/tests/test.sh",
       "permanent": false
     },
     {
@@ -22,7 +22,7 @@
     },
     {
       "source": "/test",
-      "destination": "https://raw.githubusercontent.com/refcell/guardian/main/test.sh",
+      "destination": "https://raw.githubusercontent.com/refcell/guardian/main/tests/test.sh",
       "permanent": false
     },
     {

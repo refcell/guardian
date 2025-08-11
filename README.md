@@ -16,16 +16,23 @@ A security hook for Claude that prevents accidental exposure of secrets, API key
 
 ## Quick Installation
 
-Install directly from GitHub using curl:
+Install with one simple command:
+
+```bash
+# Short version (once deployed to guardian.refcell.org)
+curl -sSL guardian.refcell.org/install | bash
+```
+
+Or use the GitHub URL directly:
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/refcell/guardian/main/install.sh | bash
 ```
 
-Or if you prefer to review the script first:
+Prefer to review first? Download and inspect:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/refcell/guardian/main/install.sh -o install-guardian.sh
+curl -sSL guardian.refcell.org/install -o install-guardian.sh
 cat install-guardian.sh  # Review the script
 bash install-guardian.sh
 ```
@@ -53,15 +60,14 @@ The installer will:
 After installation, run the comprehensive test suite to verify everything is working:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/refcell/guardian/main/test.sh | bash
+# Short version (once deployed)
+curl -sSL guardian.refcell.org/test | bash
 ```
 
-Or download and run locally:
+Or using GitHub directly:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/refcell/guardian/main/test.sh -o test-guardian.sh
-chmod +x test-guardian.sh
-./test-guardian.sh
+curl -sSL https://raw.githubusercontent.com/refcell/guardian/main/test.sh | bash
 ```
 
 The test script will:

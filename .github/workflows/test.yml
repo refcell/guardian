@@ -48,16 +48,16 @@ jobs:
     
     - name: Run basic hook tests
       run: |
-        chmod +x test.sh
-        ./test.sh
+        chmod +x tests/test.sh
+        ./tests/test.sh
     
     - name: Run comprehensive test suite
       if: always()
       run: |
-        if [ -f test-comprehensive.sh ]; then
-          chmod +x test-comprehensive.sh
+        if [ -f tests/test-comprehensive.sh ]; then
+          chmod +x tests/test-comprehensive.sh
           export GUARDIAN_DEBUG=true
-          ./test-comprehensive.sh || echo "Some comprehensive tests failed"
+          ./tests/test-comprehensive.sh || echo "Some comprehensive tests failed"
         else
           echo "Comprehensive test suite not found, skipping"
         fi

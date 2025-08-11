@@ -50,105 +50,18 @@ fi
 
 # Create the session-start-hook.js (Session start notifications)
 echo -e "${YELLOW}Creating session start hook...${NC}"
-cat > "$HOOKS_DIR/session-start-hook.js" << 'EOF'
-#!/usr/bin/env node
 
-/**
- * SessionStart Hook for Guardian
- * Displays security status when Claude Code sessions start
- */
-
-const fs = require('fs');
-const path = require('path');
-const os = require('os');
-
-const HOOKS_DIR = path.join(os.homedir(), '.claude', 'hooks');
-const CONFIG_FILE = path.join(HOOKS_DIR, 'secrets-guardian.json');
-
-const colors = {
-    reset: '\x1b[0m',
-    bright: '\x1b[1m',
-    dim: '\x1b[2m',
-    red: '\x1b[31m',
-    green: '\x1b[32m',
-    yellow: '\x1b[33m',
-    blue: '\x1b[34m',
-    cyan: '\x1b[36m'
-};
-
-function getProtectedPatterns() {
-    try {
-        const config = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
-        return Object.keys(config.patterns || {});
-    } catch (e) {
-        return ['API Keys', 'AWS Credentials', 'Passwords', 'Tokens', 'Private Keys', 'Database URLs'];
-    }
-}
-
-function main() {
-    let input = '';
-    const patterns = getProtectedPatterns();
-    
-    // Format message
-    let message = `\n${colors.cyan}${colors.bright}🛡️ Guardian Security Active${colors.reset}\n`;
-    message += `${colors.dim}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${colors.reset}\n\n`;
-    
-    try {
-        // Read input to determine session type
-        process.stdin.setEncoding('utf8');
-        process.stdin.on('data', chunk => input += chunk);
-        process.stdin.on('end', () => {
-            try {
-                const data = input ? JSON.parse(input) : {};
-                const source = data.source || data.matcher || 'startup';
-                
-                if (source === 'startup') {
-                    message += `${colors.green}Welcome! Your Claude Code session is protected.${colors.reset}\n\n`;
-                } else if (source === 'resume') {
-                    message += `${colors.green}Session resumed with security protection.${colors.reset}\n\n`;
-                } else if (source === 'clear') {
-                    message += `${colors.green}Session cleared. Starting fresh with protection.${colors.reset}\n\n`;
-                }
-            } catch (e) {
-                message += `${colors.green}Your session is protected against secret exposure.${colors.reset}\n\n`;
-            }
-            
-            message += `${colors.yellow}Protected Secret Types:${colors.reset}\n`;
-            patterns.forEach(pattern => {
-                const displayName = pattern.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-                message += `  ${colors.cyan}•${colors.reset} ${displayName}\n`;
-            });
-            
-            message += `\n${colors.blue}Security Features:${colors.reset}\n`;
-            message += `  ${colors.green}✓${colors.reset} Blocks hardcoded secrets in code\n`;
-            message += `  ${colors.green}✓${colors.reset} Scans user prompts for sensitive data\n`;
-            message += `  ${colors.green}✓${colors.reset} Protects Claude's responses from leaks\n`;
-            message += `  ${colors.green}✓${colors.reset} Monitors file operations and commands\n`;
-            
-            message += `\n${colors.dim}Tip: Use environment variables instead of hardcoded secrets${colors.reset}\n`;
-            message += `${colors.dim}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${colors.reset}\n`;
-            
-            console.log(message);
-            process.exit(0);
-        });
-        
-        // Timeout fallback
-        setTimeout(() => {
-            console.log(message);
-            process.exit(0);
-        }, 1000);
-    } catch (e) {
-        // Fallback message
-        console.log(`${colors.cyan}🛡️ Guardian Security Active${colors.reset}`);
-        console.log(`${colors.green}Your session is protected against secret exposure${colors.reset}\n`);
-        process.exit(0);
-    }
-}
-
-if (require.main === module) {
-    main();
-}
-EOF
+# Check if we're running from the repo or from curl
+if [ -f "scripts/create-session-hook.js" ]; then
+    # Running from local repo
+    node scripts/create-session-hook.js
+elif [ -f "$HOOKS_DIR/../scripts/create-session-hook.js" ]; then
+    # Already installed, use existing script
+    node "$HOOKS_DIR/../scripts/create-session-hook.js"
+else
+    # Download and run the script from GitHub
+    curl -sSL "${GITHUB_RAW_URL}/scripts/create-session-hook.js" | node
+fi
 
 # Verify the downloaded file is valid JavaScript (not HTML error page)
 if head -n 1 "$HOOKS_DIR/guardian-hook.js" | grep -q "404" || head -n 1 "$HOOKS_DIR/guardian-hook.js" | grep -q "<" ; then
@@ -195,84 +108,17 @@ if [ -f "$SETTINGS_FILE" ]; then
     # Backup existing settings
     cp "$SETTINGS_FILE" "$SETTINGS_FILE.backup.$(date +%Y%m%d_%H%M%S)"
     
-    # Use node to update JSON properly with Claude Code array format
-    node -e "
-    const fs = require('fs');
-    const settings = JSON.parse(fs.readFileSync('$SETTINGS_FILE', 'utf8'));
-    
-    // Initialize hooks if not present
-    if (!settings.hooks) {
-        settings.hooks = {};
-    }
-    
-    // Add PreToolUse hooks in array format (Claude Code format)
-    if (!settings.hooks.PreToolUse) {
-        settings.hooks.PreToolUse = [];
-    }
-    
-    // Remove existing guardian hooks if present
-    settings.hooks.PreToolUse = settings.hooks.PreToolUse.filter(h => 
-        !h.hooks || !h.hooks[0] || !h.hooks[0].command || 
-        !h.hooks[0].command.includes('guardian-hook.js')
-    );
-    
-    // Add guardian hook with wildcard matcher for ALL tools
-    settings.hooks.PreToolUse.push({
-        matcher: '.*',  // Wildcard regex to match ALL tools
-        hooks: [{
-            type: 'command',
-            command: '$HOOKS_DIR/guardian-hook.js',
-            timeout: 30
-        }]
-    });
-    
-    // Add Stop hook to scan final responses
-    if (!settings.hooks.Stop) {
-        settings.hooks.Stop = [];
-    }
-    
-    // Remove existing guardian Stop hooks if present
-    settings.hooks.Stop = settings.hooks.Stop.filter(h => 
-        !h.hooks || !h.hooks[0] || !h.hooks[0].command || 
-        !h.hooks[0].command.includes('guardian-hook.js')
-    );
-    
-    // Add guardian hook for Stop event (matches all)
-    settings.hooks.Stop.push({
-        matcher: '.*',
-        hooks: [{
-            type: 'command',
-            command: '$HOOKS_DIR/guardian-hook.js',
-            timeout: 30
-        }]
-    });
-    
-    // Add SessionStart hooks
-    if (!settings.hooks.SessionStart) {
-        settings.hooks.SessionStart = [];
-    }
-    
-    // Remove existing guardian session hooks
-    settings.hooks.SessionStart = settings.hooks.SessionStart.filter(h => 
-        !h.hooks || !h.hooks[0] || !h.hooks[0].command || 
-        !h.hooks[0].command.includes('session-start-hook.js')
-    );
-    
-    // Add session start hooks for different matchers with absolute paths
-    const sessionHookPath = require('path').join('$HOOKS_DIR', 'session-start-hook.js');
-    ['startup', 'resume', 'clear'].forEach(matcher => {
-        settings.hooks.SessionStart.push({
-            matcher: matcher,
-            hooks: [{
-                type: 'command',
-                command: sessionHookPath,
-                timeout: 10
-            }]
-        });
-    });
-    
-    fs.writeFileSync('$SETTINGS_FILE', JSON.stringify(settings, null, 2));
-    "
+    # Use the update-settings script
+    if [ -f "scripts/update-settings.js" ]; then
+        # Running from local repo
+        node scripts/update-settings.js
+    elif [ -f "$HOOKS_DIR/../scripts/update-settings.js" ]; then
+        # Already installed, use existing script
+        node "$HOOKS_DIR/../scripts/update-settings.js"
+    else
+        # Download and run the script from GitHub
+        curl -sSL "${GITHUB_RAW_URL}/scripts/update-settings.js" | node
+    fi
 else
     echo -e "${YELLOW}Creating new settings.json...${NC}"
     cat > "$SETTINGS_FILE" <<EOF

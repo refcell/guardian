@@ -59,7 +59,7 @@ Files installed in `~/.claude/hooks/`:
 
 **Not working?**
 - Check installation: `grep guardian ~/.claude/settings.json`
-- Test manually: `./test.sh`
+- Test manually: `./tests/test.sh`
 - Enable debug: `export GUARDIAN_DEBUG=true`
 
 **False positives?**
@@ -77,7 +77,7 @@ Files installed in `~/.claude/hooks/`:
 ```bash
 git clone https://github.com/refcell/guardian
 cd guardian
-./test.sh
+./tests/test.sh
 ```
 
 ## License

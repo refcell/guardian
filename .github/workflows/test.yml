@@ -28,7 +28,8 @@ jobs:
         # Copy hook files to test location
         cp hooks/guardian-hook.js $HOME/.claude/hooks/
         cp hooks/secrets-guardian.json $HOME/.claude/hooks/
-        chmod +x $HOME/.claude/hooks/guardian-hook.js
+        [ -f hooks/session-start-hook.js ] && cp hooks/session-start-hook.js $HOME/.claude/hooks/ || echo "Session hook not found"
+        chmod +x $HOME/.claude/hooks/*.js 2>/dev/null || chmod +x $HOME/.claude/hooks/guardian-hook.js
         
         # Configure hooks properly using the script
         export GUARDIAN_DEBUG=true

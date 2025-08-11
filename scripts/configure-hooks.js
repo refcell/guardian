@@ -72,6 +72,33 @@ configureHook('UserPromptSubmit', '.*', 'Scan all user prompts');
 configureHook('Stop', '.*', 'Scan all Claude responses');
 configureHook('SubagentStop', '.*', 'Scan all subagent responses');
 
+// Configure SessionStart hooks for all session types
+if (!settings.hooks.SessionStart) {
+    settings.hooks.SessionStart = [];
+}
+
+// Remove existing guardian session hooks
+settings.hooks.SessionStart = settings.hooks.SessionStart.filter(config => {
+    if (!config.hooks || !Array.isArray(config.hooks)) return true;
+    return !config.hooks.some(h => 
+        h.command && h.command.includes('session-start-hook')
+    );
+});
+
+// Add session start hooks for different matchers
+const sessionStartScript = path.join(HOOKS_DIR, 'session-start-hook.js');
+['startup', 'resume', 'clear'].forEach(matcher => {
+    settings.hooks.SessionStart.push({
+        matcher: matcher,
+        hooks: [{
+            type: 'command',
+            command: sessionStartScript,
+            timeout: 10
+        }]
+    });
+});
+console.log('  ✅ SessionStart: Display security status on startup, resume, clear');
+
 // Optional: PostToolUse for debugging
 if (process.env.GUARDIAN_DEBUG === 'true') {
     configureHook('PostToolUse', 'Write|Edit|MultiEdit|Bash', 'Log tool usage (debug mode)');
@@ -89,11 +116,13 @@ try {
 // Verify the configuration
 console.log('\nVerifying configuration:');
 console.log(`  Hook script: ${fs.existsSync(HOOK_SCRIPT) ? '✅ Found' : '❌ Not found'}`);
+console.log(`  Session hook: ${fs.existsSync(sessionStartScript) ? '✅ Found' : '❌ Not found'}`);
 console.log(`  Config file: ${fs.existsSync(path.join(HOOKS_DIR, 'secrets-guardian.json')) ? '✅ Found' : '❌ Not found'}`);
 console.log(`  Settings: ${SETTINGS_FILE}`);
 
 console.log('\n📋 Summary:');
 console.log('  The Guardian hook is now configured to:');
+console.log('  • Show security status when sessions start/resume/clear');
 console.log('  • Block secrets in Write, Edit, MultiEdit, Bash, and Task operations');
 console.log('  • Scan user prompts before processing');
 console.log('  • Scan Claude\'s responses before displaying');

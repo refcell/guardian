@@ -48,6 +48,23 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
+# Download the session-start-hook.js (Session start notifications)
+curl -sSL "${GITHUB_RAW_URL}/hooks/session-start-hook.js" -o "$HOOKS_DIR/session-start-hook.js" 2>/dev/null || {
+    echo -e "${YELLOW}Note: Session start hook not available on remote, using fallback${NC}"
+    # Create a simple fallback session hook
+    cat > "$HOOKS_DIR/session-start-hook.js" << 'EOF'
+#!/usr/bin/env node
+const colors = {
+    cyan: '\x1b[36m',
+    green: '\x1b[32m',
+    reset: '\x1b[0m'
+};
+console.log(`${colors.cyan}🛡️ Guardian Security Active${colors.reset}`);
+console.log(`${colors.green}Your session is protected against secret exposure${colors.reset}\n`);
+process.exit(0);
+EOF
+}
+
 # Verify the downloaded file is valid JavaScript (not HTML error page)
 if head -n 1 "$HOOKS_DIR/guardian-hook.js" | grep -q "404" || head -n 1 "$HOOKS_DIR/guardian-hook.js" | grep -q "<" ; then
     echo -e "${RED}Error: Downloaded file appears to be an error page, not JavaScript${NC}"
@@ -79,8 +96,9 @@ if ! python3 -m json.tool "$HOOKS_DIR/secrets-guardian.json" > /dev/null 2>&1 &&
     exit 1
 fi
 
-# Make the hook executable
+# Make the hooks executable
 chmod +x "$HOOKS_DIR/guardian-hook.js"
+chmod +x "$HOOKS_DIR/session-start-hook.js" 2>/dev/null || true
 
 echo -e "${GREEN}✅ Files downloaded successfully${NC}"
 
@@ -142,6 +160,28 @@ if [ -f "$SETTINGS_FILE" ]; then
         }]
     });
     
+    // Add SessionStart hooks
+    if (!settings.hooks.SessionStart) {
+        settings.hooks.SessionStart = [];
+    }
+    
+    // Remove existing guardian session hooks
+    settings.hooks.SessionStart = settings.hooks.SessionStart.filter(h => 
+        !h.hooks || !h.hooks[0] || !h.hooks[0].command || 
+        !h.hooks[0].command.includes('session-start-hook.js')
+    );
+    
+    // Add session start hooks for different matchers
+    ['startup', 'resume', 'clear'].forEach(matcher => {
+        settings.hooks.SessionStart.push({
+            matcher: matcher,
+            hooks: [{
+                type: 'command',
+                command: '$HOOKS_DIR/session-start-hook.js'
+            }]
+        });
+    });
+    
     fs.writeFileSync('$SETTINGS_FILE', JSON.stringify(settings, null, 2));
     "
 else
@@ -167,6 +207,35 @@ else
           {
             "type": "command",
             "command": "$HOOKS_DIR/guardian-hook.js"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOOKS_DIR/session-start-hook.js"
+          }
+        ]
+      },
+      {
+        "matcher": "resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOOKS_DIR/session-start-hook.js"
+          }
+        ]
+      },
+      {
+        "matcher": "clear",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOOKS_DIR/session-start-hook.js"
           }
         ]
       }
@@ -207,6 +276,8 @@ echo "  • Hooks installed to: $HOOKS_DIR"
 echo "  • Settings updated at: $SETTINGS_FILE"
 echo
 echo -e "${YELLOW}Configured hooks:${NC}"
+echo "  ${BLUE}SessionStart:${NC}"
+echo "    • Shows security status when sessions start/resume/clear"
 echo "  ${BLUE}PreToolUse:${NC}"
 echo "    • Write: Scans content before writing files"
 echo "    • Edit: Scans content before editing files"

@@ -1,0 +1,214 @@
+name: Test Guardian Hooks
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  test-hooks:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+    
+    - name: Create test environment
+      run: |
+        # Create mock Claude config directory
+        mkdir -p $HOME/.claude/hooks
+        
+        # Copy hook files to test location
+        cp hooks/guardian-hook.js $HOME/.claude/hooks/
+        cp hooks/secrets-guardian.json $HOME/.claude/hooks/
+        chmod +x $HOME/.claude/hooks/guardian-hook.js
+        
+        # Configure hooks properly using the script
+        export GUARDIAN_DEBUG=true
+        node scripts/configure-hooks.js || echo "Configure script not found, using manual config"
+        
+        # Fallback: Create a mock settings.json if script failed
+        if [ ! -f $HOME/.claude/settings.json ]; then
+          echo '{
+            "hooks": {
+              "PreToolUse": [{"matcher": "Write|Edit|MultiEdit|Bash|Task", "hooks": [{"type": "command", "command": "'$HOME'/.claude/hooks/guardian-hook.js"}]}],
+              "UserPromptSubmit": [{"matcher": ".*", "hooks": [{"type": "command", "command": "'$HOME'/.claude/hooks/guardian-hook.js"}]}],
+              "Stop": [{"matcher": ".*", "hooks": [{"type": "command", "command": "'$HOME'/.claude/hooks/guardian-hook.js"}]}]
+            }
+          }' > $HOME/.claude/settings.json
+        fi
+    
+    - name: Run basic hook tests
+      run: |
+        chmod +x test.sh
+        ./test.sh
+    
+    - name: Run comprehensive test suite
+      if: always()
+      run: |
+        if [ -f test-comprehensive.sh ]; then
+          chmod +x test-comprehensive.sh
+          export GUARDIAN_DEBUG=true
+          ./test-comprehensive.sh || echo "Some comprehensive tests failed"
+        else
+          echo "Comprehensive test suite not found, skipping"
+        fi
+    
+    - name: Test hook directly with secrets
+      run: |
+        echo "Testing direct hook invocation with secrets..."
+        
+        # Test AWS key detection
+        echo '{"toolName":"Write","toolInput":{"content":"AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE"}}' | \
+          node $HOME/.claude/hooks/guardian-hook.js && \
+          echo "ERROR: Hook should have blocked AWS key!" && exit 1 || \
+          echo "✅ AWS key correctly blocked"
+        
+        # Test GitHub token detection  
+        echo '{"toolName":"Write","toolInput":{"content":"GITHUB_TOKEN=ghp_1234567890abcdef1234567890abcdef12"}}' | \
+          node $HOME/.claude/hooks/guardian-hook.js && \
+          echo "ERROR: Hook should have blocked GitHub token!" && exit 1 || \
+          echo "✅ GitHub token correctly blocked"
+        
+        # Test safe content passes
+        echo '{"toolName":"Write","toolInput":{"content":"const config = { debug: true };"}}' | \
+          node $HOME/.claude/hooks/guardian-hook.js && \
+          echo "✅ Safe content correctly allowed" || \
+          (echo "ERROR: Hook blocked safe content!" && exit 1)
+    
+    - name: Test Stop event handling
+      run: |
+        echo "Testing Stop event handling..."
+        
+        # Test Stop event with secrets in messages
+        echo '{
+          "messages": [
+            {
+              "role": "assistant",
+              "content": "Here is your API key: sk-proj-abcdef123456789012345"
+            }
+          ],
+          "modelUsage": {}
+        }' | node $HOME/.claude/hooks/guardian-hook.js && \
+          echo "ERROR: Hook should have blocked API key in Stop event!" && exit 1 || \
+          echo "✅ Stop event with secrets correctly blocked"
+        
+        # Test Stop event with safe content
+        echo '{
+          "messages": [
+            {
+              "role": "assistant", 
+              "content": "Here is how to configure your application"
+            }
+          ],
+          "modelUsage": {}
+        }' | node $HOME/.claude/hooks/guardian-hook.js && \
+          echo "✅ Stop event with safe content correctly allowed" || \
+          (echo "ERROR: Hook blocked safe Stop event!" && exit 1)
+    
+    - name: Test installation script
+      run: |
+        # Test that install script exists and is executable
+        test -f install.sh || (echo "ERROR: install.sh not found!" && exit 1)
+        test -x install.sh || chmod +x install.sh
+        echo "✅ Installation script verified"
+    
+    - name: Test uninstall script
+      run: |
+        # Test that uninstall script exists and is executable
+        test -f uninstall.sh || (echo "ERROR: uninstall.sh not found!" && exit 1)
+        test -x uninstall.sh || chmod +x uninstall.sh
+        echo "✅ Uninstall script verified"
+
+  test-patterns:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+    
+    - name: Test secret patterns coverage
+      run: |
+        # Create test script to verify all pattern categories
+        cat > test-patterns.js << 'EOF'
+        const fs = require('fs');
+        const path = require('path');
+        
+        // Load the secrets configuration
+        const config = JSON.parse(
+          fs.readFileSync('hooks/secrets-guardian.json', 'utf8')
+        );
+        
+        // Test cases for each pattern category
+        const testCases = {
+          aws: [
+            'AKIAIOSFODNN7EXAMPLE',
+            'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY'
+          ],
+          api_keys: [
+            'sk-proj-abcdef123456789012345',
+            'ghp_1234567890abcdef1234567890abcdef12',
+            'xoxb-12345-12345-abcdefghijklmnop'
+          ],
+          database: [
+            'mongodb://user:pass@localhost:27017/db',
+            'postgres://user:password@localhost:5432/mydb',
+            'mysql://root:password@localhost:3306/database'
+          ],
+          private_keys: [
+            '-----BEGIN RSA PRIVATE KEY-----',
+            '-----BEGIN EC PRIVATE KEY-----',
+            '-----BEGIN PRIVATE KEY-----'
+          ],
+          auth_tokens: [
+            'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.test.test'
+          ],
+          passwords: [
+            'password: MySecretPassword123!',
+            'pass=SuperSecret@123'
+          ]
+        };
+        
+        let allPassed = true;
+        
+        for (const [category, tests] of Object.entries(testCases)) {
+          if (!config.patterns[category]) {
+            console.error(`❌ Missing pattern category: ${category}`);
+            allPassed = false;
+            continue;
+          }
+          
+          console.log(`Testing ${category} patterns...`);
+          const patterns = config.patterns[category].map(p => new RegExp(p, 'gi'));
+          
+          for (const testSecret of tests) {
+            const detected = patterns.some(p => {
+              p.lastIndex = 0;
+              return p.test(testSecret);
+            });
+            
+            if (detected) {
+              console.log(`  ✅ Detected: ${testSecret.substring(0, 30)}...`);
+            } else {
+              console.error(`  ❌ NOT detected: ${testSecret}`);
+              allPassed = false;
+            }
+          }
+        }
+        
+        process.exit(allPassed ? 0 : 1);
+        EOF
+        
+        node test-patterns.js

@@ -45,6 +45,7 @@ try {
 class SecretsGuardian {
   constructor() {
     this.patterns = this.compilePatterns(agentConfig.patterns);
+    debugLog(`Compiled ${Object.keys(this.patterns).length} pattern categories`);
   }
 
   compilePatterns(patternGroups) {
@@ -81,13 +82,13 @@ class SecretsGuardian {
         try {
           const matches = [...contentStr.matchAll(pattern)];
           for (const match of matches) {
-          const secret = {
-            type: category,
-            match: match[0].substring(0, 50) + '...',
-            line: this.getLineNumber(contentStr, match.index),
-            position: match.index
-          };
-          
+            const secret = {
+              type: category,
+              match: match[0].substring(0, 50) + (match[0].length > 50 ? '...' : ''),
+              line: this.getLineNumber(contentStr, match.index),
+              position: match.index
+            };
+            
             results.secrets_found.push(secret);
             results.status = 'danger';
             debugLog(`Found secret: ${category} at position ${match.index}`);
@@ -171,7 +172,6 @@ function processHookInput(input) {
         if (typeof m.content === 'string') {
           return m.content;
         } else if (Array.isArray(m.content)) {
-          // Handle structured content
           return m.content.map(c => c.text || '').join('\n');
         }
         return '';
@@ -188,12 +188,6 @@ function processHookInput(input) {
       debugLog(`Notification event: ${data.notification_type}`);
       // Don't scan notifications, just pass through
       process.exit(0);
-    } else if (data.toolName && data.toolInput) {
-      // Legacy format - kept for compatibility
-      eventType = 'Legacy';
-      const { toolName, toolInput } = data;
-      debugLog(`Legacy tool event: ${toolName}`);
-      contentToScan = JSON.stringify(toolInput);
     } else {
       // Unknown format - scan everything as fallback
       eventType = 'Unknown';
@@ -296,7 +290,7 @@ function main() {
 // Run if called directly
 if (require.main === module) {
   main();
-}
-
+} else {
   // Export for testing
   module.exports = { SecretsGuardian, processHookInput };
+}

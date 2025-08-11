@@ -9,12 +9,17 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
+# GitHub repository details
+GITHUB_REPO="refcell/guardian"
+GITHUB_RAW_URL="https://raw.githubusercontent.com/${GITHUB_REPO}/main"
+
 # Claude configuration directory
 CLAUDE_CONFIG_DIR="$HOME/.config/claude"
 HOOKS_DIR="$CLAUDE_CONFIG_DIR/hooks"
-SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+AGENTS_DIR="$CLAUDE_CONFIG_DIR/agents"
 
 echo -e "${BLUE}=== Claude Secrets Guardian Hook Installer ===${NC}"
+echo -e "${BLUE}Installing from: github.com/${GITHUB_REPO}${NC}"
 echo
 
 # Check if Node.js is installed
@@ -23,18 +28,39 @@ if ! command -v node &> /dev/null; then
     exit 1
 fi
 
+# Check if curl is installed
+if ! command -v curl &> /dev/null; then
+    echo -e "${RED}Error: curl is not installed. Please install curl first.${NC}"
+    exit 1
+fi
+
 # Create Claude config directories if they don't exist
 echo -e "${YELLOW}Creating Claude configuration directories...${NC}"
 mkdir -p "$CLAUDE_CONFIG_DIR"
 mkdir -p "$HOOKS_DIR"
+mkdir -p "$AGENTS_DIR"
 
-# Copy hook files
-echo -e "${YELLOW}Installing secrets-guardian hook...${NC}"
-cp -r "$SCRIPTS_DIR/hooks/secure-command.js" "$HOOKS_DIR/"
-cp -r "$SCRIPTS_DIR/agents" "$CLAUDE_CONFIG_DIR/"
+# Download hook files from GitHub
+echo -e "${YELLOW}Downloading secrets-guardian hook from GitHub...${NC}"
+
+# Download the secure-command.js hook
+curl -sSL "${GITHUB_RAW_URL}/hooks/secure-command.js" -o "$HOOKS_DIR/secure-command.js"
+if [ $? -ne 0 ]; then
+    echo -e "${RED}Failed to download secure-command.js${NC}"
+    exit 1
+fi
+
+# Download the agent configuration
+curl -sSL "${GITHUB_RAW_URL}/agents/secrets-guardian.json" -o "$AGENTS_DIR/secrets-guardian.json"
+if [ $? -ne 0 ]; then
+    echo -e "${RED}Failed to download secrets-guardian.json${NC}"
+    exit 1
+fi
 
 # Make the hook executable
 chmod +x "$HOOKS_DIR/secure-command.js"
+
+echo -e "${GREEN}✅ Files downloaded successfully${NC}"
 
 # Create or update Claude settings.json
 SETTINGS_FILE="$CLAUDE_CONFIG_DIR/settings.json"
@@ -80,51 +106,32 @@ else
 EOF
 fi
 
-# Create test script
-echo -e "${YELLOW}Creating test script...${NC}"
-cat > "$SCRIPTS_DIR/test-hook.sh" <<'EOF'
-#!/bin/bash
-
-echo "Testing Secrets Guardian Hook..."
+# Test the installation
 echo
+echo -e "${YELLOW}Testing installation...${NC}"
 
-# Test cases
-declare -a test_cases=(
-    "AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE"
-    "api_key = 'sk-proj-abcdef123456789'"
-    "password: supersecret123"
-    "mongodb://user:pass@localhost:27017"
-    "github_token=ghp_1234567890abcdef"
-    "-----BEGIN RSA PRIVATE KEY-----"
-)
+# Create a temporary test file
+TEMP_TEST_FILE=$(mktemp)
+echo "const safe = true;" > "$TEMP_TEST_FILE"
 
-for test in "${test_cases[@]}"; do
-    echo "Testing: ${test:0:30}..."
-    result=$(echo "$test" | node hooks/secure-command.js 2>&1)
-    status=$?
-    
-    if [ $status -ne 0 ]; then
-        echo "✅ Secret detected and blocked!"
-    else
-        echo "⚠️  Secret not detected"
-    fi
-    echo "$result" | jq -r '.status' 2>/dev/null || echo "$result"
-    echo "---"
-done
-
-echo
-echo "Testing safe content..."
-result=$(echo "const config = { debug: true };" | node hooks/secure-command.js 2>&1)
-status=$?
-
-if [ $status -eq 0 ]; then
-    echo "✅ Safe content passed!"
+# Test with safe content
+echo -e "Testing with safe content..."
+if echo "const config = { debug: true };" | node "$HOOKS_DIR/secure-command.js" > /dev/null 2>&1; then
+    echo -e "${GREEN}✅ Safe content test passed${NC}"
 else
-    echo "❌ Safe content was blocked"
+    echo -e "${RED}❌ Safe content test failed${NC}"
 fi
-EOF
 
-chmod +x "$SCRIPTS_DIR/test-hook.sh"
+# Test with secret content
+echo -e "Testing with secret content..."
+if echo "AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE" | node "$HOOKS_DIR/secure-command.js" > /dev/null 2>&1; then
+    echo -e "${RED}❌ Secret detection test failed - secrets not blocked${NC}"
+else
+    echo -e "${GREEN}✅ Secret detection test passed - secrets blocked${NC}"
+fi
+
+# Clean up temp file
+rm -f "$TEMP_TEST_FILE"
 
 # Verification
 echo
@@ -132,7 +139,7 @@ echo -e "${GREEN}✅ Installation complete!${NC}"
 echo
 echo -e "${BLUE}Installation Summary:${NC}"
 echo "  • Hooks installed to: $HOOKS_DIR"
-echo "  • Agent config installed to: $CLAUDE_CONFIG_DIR/agents"
+echo "  • Agent config installed to: $AGENTS_DIR"
 echo "  • Settings updated at: $SETTINGS_FILE"
 echo
 echo -e "${YELLOW}Configured hooks:${NC}"
@@ -141,8 +148,13 @@ echo "  • pre-edit: Scans files before editing"
 echo "  • pre-bash: Scans bash commands before execution"
 echo "  • pre-commit: Scans files before git commits"
 echo
-echo -e "${BLUE}To test the installation:${NC}"
-echo "  cd $SCRIPTS_DIR"
-echo "  ./test-hook.sh"
-echo
 echo -e "${GREEN}The secrets guardian is now active and will block any attempts to expose secrets!${NC}"
+echo
+echo -e "${BLUE}To verify the installation worked:${NC}"
+echo "  1. Try creating a file with a secret in Claude"
+echo "  2. The operation should be blocked with a security warning"
+echo
+echo -e "${YELLOW}To uninstall:${NC}"
+echo "  Remove the hook entries from: $SETTINGS_FILE"
+echo "  Delete: $HOOKS_DIR/secure-command.js"
+echo "  Delete: $AGENTS_DIR/secrets-guardian.json"

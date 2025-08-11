@@ -14,28 +14,43 @@ A security hook for Claude that prevents accidental exposure of secrets, API key
 - **Structured Response Format**: Returns JSON with detection status, found secrets, and recommendations
 - **Automatic Blocking**: Prevents operations when secrets are detected
 
-## Installation
+## Quick Installation
 
-Run the installation script:
+Install directly from GitHub using curl:
 
 ```bash
+curl -sSL https://raw.githubusercontent.com/refcell/guardian/main/install.sh | bash
+```
+
+Or if you prefer to review the script first:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/refcell/guardian/main/install.sh -o install-guardian.sh
+cat install-guardian.sh  # Review the script
+bash install-guardian.sh
+```
+
+## Manual Installation
+
+Clone the repository and run the installer:
+
+```bash
+git clone https://github.com/refcell/guardian.git
+cd guardian
 ./install.sh
 ```
 
-This will:
-1. Install the hook scripts to `~/.config/claude/hooks/`
-2. Copy agent configurations to `~/.config/claude/agents/`
+## What Gets Installed
+
+The installer will:
+1. Download hook scripts to `~/.config/claude/hooks/`
+2. Download agent configurations to `~/.config/claude/agents/`
 3. Update or create `~/.config/claude/settings.json` with hook configurations
-4. Create a test script to verify the installation
+4. Run tests to verify the installation works
 
 ## Testing
 
-After installation, test the hook:
-
-```bash
-cd claude-secrets-hook
-./test-hook.sh
-```
+The installer automatically runs tests to verify the hooks are working. You can also manually test the hooks are functioning:
 
 ## Manual Testing
 
@@ -90,9 +105,19 @@ Edit `agents/secrets-guardian.json` to:
 - Modify detection rules
 - Customize response messages
 
+## Requirements
+
+- Node.js (for running the hook)
+- curl (for remote installation)
+- Claude CLI configured on your system
+
 ## Uninstallation
 
 To remove the hook:
 1. Remove hook entries from `~/.config/claude/settings.json`
 2. Delete `~/.config/claude/hooks/secure-command.js`
 3. Delete `~/.config/claude/agents/secrets-guardian.json`
+
+## License
+
+MIT License - See [LICENSE](LICENSE) file for details.

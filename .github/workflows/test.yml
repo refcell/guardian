@@ -154,16 +154,21 @@ jobs:
         
         // Test cases for each pattern category
         const testCases = {
-          aws: [
-            'AKIAIOSFODNN7EXAMPLE',
-            'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY'
+          aws_credentials: [
+            'AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE',
+            'AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY'
           ],
           api_keys: [
-            'sk-proj-abcdef123456789012345',
-            'ghp_1234567890abcdef1234567890abcdef12',
-            'xoxb-12345-12345-abcdefghijklmnop'
+            'api_key=sk-proj-abcdef123456789012345',
+            'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.test.test',
+            'API_KEY=abcdefghijklmnopqrstuvwxyz123456'
           ],
-          database: [
+          tokens: [
+            'github_token=ghp_1234567890abcdef1234567890abcdef12',
+            'slack_token=xoxb-12345-12345-abcdefghijklmnop',
+            'ghp_1234567890abcdef1234567890abcdef12'
+          ],
+          database_urls: [
             'mongodb://user:pass@localhost:27017/db',
             'postgres://user:password@localhost:5432/mydb',
             'mysql://root:password@localhost:3306/database'
@@ -172,9 +177,6 @@ jobs:
             '-----BEGIN RSA PRIVATE KEY-----',
             '-----BEGIN EC PRIVATE KEY-----',
             '-----BEGIN PRIVATE KEY-----'
-          ],
-          auth_tokens: [
-            'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.test.test'
           ],
           passwords: [
             'password: MySecretPassword123!',

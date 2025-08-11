@@ -169,17 +169,19 @@ class SecretsScanner {
                 try {
                     const stats = fs.statSync(filePath);
                     if (stats.isFile() && stats.size > 0 && stats.size < 1024 * 1024) { // Skip files > 1MB
-                        const content = fs.readFileSync(filePath, { encoding: 'utf8', flag: 'r' });
-                        const findings = this.scanContent(content);
-                        if (findings.length > 0) {
-                            warnings.push({
-                                type: 'file',
-                                path: file,
-                                secrets: findings.length,
-                                findings: findings,
-                                types: [...new Set(findings.map(f => f.type))],
-                                isGitIgnored: this.isFileGitIgnored(file, cwd)
-                            });
+                        // Skip gitignored files
+                        if (!this.isFileGitIgnored(file, cwd)) {
+                            const content = fs.readFileSync(filePath, { encoding: 'utf8', flag: 'r' });
+                            const findings = this.scanContent(content);
+                            if (findings.length > 0) {
+                                warnings.push({
+                                    type: 'file',
+                                    path: file,
+                                    secrets: findings.length,
+                                    findings: findings,
+                                    types: [...new Set(findings.map(f => f.type))]
+                                });
+                            }
                         }
                     }
                 } catch (e) {

@@ -216,12 +216,13 @@ if [ -f "$SETTINGS_FILE" ]; then
         !h.hooks[0].command.includes('guardian-hook.js')
     );
     
-    // Add guardian hook for Write, Edit, MultiEdit, and Bash tools
+    // Add guardian hook with wildcard matcher for ALL tools
     settings.hooks.PreToolUse.push({
-        matcher: 'Write|Edit|MultiEdit|Bash',
+        matcher: '.*',  // Wildcard regex to match ALL tools
         hooks: [{
             type: 'command',
-            command: '$HOOKS_DIR/guardian-hook.js'
+            command: '$HOOKS_DIR/guardian-hook.js',
+            timeout: 30
         }]
     });
     
@@ -241,7 +242,8 @@ if [ -f "$SETTINGS_FILE" ]; then
         matcher: '.*',
         hooks: [{
             type: 'command',
-            command: '$HOOKS_DIR/guardian-hook.js'
+            command: '$HOOKS_DIR/guardian-hook.js',
+            timeout: 30
         }]
     });
     
@@ -278,11 +280,12 @@ else
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Write|Edit|MultiEdit|Bash",
+        "matcher": ".*",
         "hooks": [
           {
             "type": "command",
-            "command": "$HOOKS_DIR/guardian-hook.js"
+            "command": "$HOOKS_DIR/guardian-hook.js",
+            "timeout": 30
           }
         ]
       }
@@ -293,7 +296,8 @@ else
         "hooks": [
           {
             "type": "command",
-            "command": "$HOOKS_DIR/guardian-hook.js"
+            "command": "$HOOKS_DIR/guardian-hook.js",
+            "timeout": 30
           }
         ]
       }
@@ -367,14 +371,11 @@ echo "  • Settings updated at: $SETTINGS_FILE"
 echo
 echo -e "${YELLOW}Configured hooks:${NC}"
 echo "  ${BLUE}SessionStart:${NC}"
-echo "    • Shows security status when sessions start/resume/clear"
+echo "    • Scans for exposed secrets when sessions start/resume/clear"
 echo "  ${BLUE}PreToolUse:${NC}"
-echo "    • Write: Scans content before writing files"
-echo "    • Edit: Scans content before editing files"
-echo "    • MultiEdit: Scans content before multi-editing files"
-echo "    • Bash: Scans commands before execution"
+echo "    • ALL tools: Scans every operation for secrets (wildcard matcher)"
 echo "  ${BLUE}Stop:${NC}"
-echo "    • Scans Claude's final response for any exposed secrets"
+echo "    • ALL responses: Scans Claude's outputs for exposed secrets"
 echo
 echo -e "${GREEN}The secrets guardian is now active and will block any attempts to expose secrets!${NC}"
 echo

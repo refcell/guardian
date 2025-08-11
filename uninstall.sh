@@ -18,7 +18,7 @@ echo -e "${BLUE}=== Claude Secrets Guardian Uninstaller ===${NC}"
 echo
 
 # Check if the hook is installed
-if [ ! -f "$HOOKS_DIR/secure-command.js" ] && [ ! -f "$HOOKS_DIR/guardian-wrapper.sh" ]; then
+if [ ! -f "$HOOKS_DIR/guardian-hook.js" ] && [ ! -f "$HOOKS_DIR/secure-command.js" ] && [ ! -f "$HOOKS_DIR/guardian-wrapper.sh" ]; then
     echo -e "${YELLOW}Guardian hook is not installed.${NC}"
     exit 0
 fi
@@ -41,6 +41,12 @@ fi
 echo
 
 # Remove hook files
+if [ -f "$HOOKS_DIR/guardian-hook.js" ]; then
+    echo -e "${YELLOW}Removing guardian hook script...${NC}"
+    rm -f "$HOOKS_DIR/guardian-hook.js"
+    echo -e "${GREEN}✅ Guardian hook removed${NC}"
+fi
+
 if [ -f "$HOOKS_DIR/guardian-wrapper.sh" ]; then
     echo -e "${YELLOW}Removing wrapper script...${NC}"
     rm -f "$HOOKS_DIR/guardian-wrapper.sh"
@@ -48,9 +54,9 @@ if [ -f "$HOOKS_DIR/guardian-wrapper.sh" ]; then
 fi
 
 if [ -f "$HOOKS_DIR/secure-command.js" ]; then
-    echo -e "${YELLOW}Removing hook script...${NC}"
+    echo -e "${YELLOW}Removing legacy hook script...${NC}"
     rm -f "$HOOKS_DIR/secure-command.js"
-    echo -e "${GREEN}✅ Hook script removed${NC}"
+    echo -e "${GREEN}✅ Legacy hook removed${NC}"
 fi
 
 if [ -f "$HOOKS_DIR/secrets-guardian.json" ]; then
@@ -73,19 +79,32 @@ if [ -f "$SETTINGS_FILE" ]; then
         try {
             const settings = JSON.parse(fs.readFileSync('$SETTINGS_FILE', 'utf8'));
             
-            // Remove guardian hook entries from PreToolUse
+            // Remove guardian hook entries from PreToolUse (array format)
             if (settings.hooks && settings.hooks.PreToolUse) {
-                const toolsToClean = ['Write', 'Edit', 'MultiEdit', 'Bash'];
-                toolsToClean.forEach(tool => {
-                    if (settings.hooks.PreToolUse[tool] && 
-                        settings.hooks.PreToolUse[tool].includes('guardian-wrapper.sh')) {
-                        delete settings.hooks.PreToolUse[tool];
+                if (Array.isArray(settings.hooks.PreToolUse)) {
+                    // New array format
+                    settings.hooks.PreToolUse = settings.hooks.PreToolUse.filter(h => 
+                        !h.hooks || !h.hooks[0] || !h.hooks[0].command || 
+                        (!h.hooks[0].command.includes('guardian-hook.js') &&
+                         !h.hooks[0].command.includes('guardian-wrapper.sh'))
+                    );
+                    
+                    if (settings.hooks.PreToolUse.length === 0) {
+                        delete settings.hooks.PreToolUse;
                     }
-                });
-                
-                // Remove empty PreToolUse object
-                if (Object.keys(settings.hooks.PreToolUse).length === 0) {
-                    delete settings.hooks.PreToolUse;
+                } else {
+                    // Old object format (for backwards compatibility)
+                    const toolsToClean = ['Write', 'Edit', 'MultiEdit', 'Bash'];
+                    toolsToClean.forEach(tool => {
+                        if (settings.hooks.PreToolUse[tool] && 
+                            settings.hooks.PreToolUse[tool].includes('guardian-wrapper.sh')) {
+                            delete settings.hooks.PreToolUse[tool];
+                        }
+                    });
+                    
+                    if (Object.keys(settings.hooks.PreToolUse).length === 0) {
+                        delete settings.hooks.PreToolUse;
+                    }
                 }
                 
                 // Remove empty hooks object

@@ -41,59 +41,10 @@ mkdir -p "$HOOKS_DIR"
 # Download hook files from GitHub
 echo -e "${YELLOW}Downloading secrets-guardian hook from GitHub...${NC}"
 
-# Download the wrapper script
-cat > "$HOOKS_DIR/guardian-wrapper.sh" <<'EOF'
-#!/bin/bash
-# Guardian wrapper script for Claude Code hooks
-
-HOOKS_DIR="$(dirname "$0")"
-NODE_SCRIPT="$HOOKS_DIR/secure-command.js"
-
-# Get the tool name and content from Claude Code
-TOOL_NAME="$1"
-shift
-
-# Read content from stdin or arguments
-if [ -t 0 ]; then
-    # Input from arguments
-    CONTENT="$*"
-else
-    # Input from stdin
-    CONTENT=$(cat)
-fi
-
-# Run the Node.js script based on tool type
-case "$TOOL_NAME" in
-    "Write"|"Edit"|"MultiEdit")
-        echo "$CONTENT" | node "$NODE_SCRIPT" --file
-        ;;
-    "Bash")
-        echo "$CONTENT" | node "$NODE_SCRIPT" --command
-        ;;
-    *)
-        # Unknown tool, let it pass
-        exit 0
-        ;;
-esac
-
-EXIT_CODE=$?
-
-# If secrets were found, block the operation
-if [ $EXIT_CODE -ne 0 ]; then
-    echo "❌ Operation blocked: Secrets detected!" >&2
-    echo "Please remove sensitive information before proceeding." >&2
-    exit 1
-fi
-
-exit 0
-EOF
-
-chmod +x "$HOOKS_DIR/guardian-wrapper.sh"
-
-# Download the secure-command.js hook
-curl -sSL "${GITHUB_RAW_URL}/hooks/secure-command.js" -o "$HOOKS_DIR/secure-command.js"
+# Download the guardian-hook.js (Claude Code compatible hook)
+curl -sSL "${GITHUB_RAW_URL}/hooks/guardian-hook.js" -o "$HOOKS_DIR/guardian-hook.js"
 if [ $? -ne 0 ]; then
-    echo -e "${RED}Failed to download secure-command.js${NC}"
+    echo -e "${RED}Failed to download guardian-hook.js${NC}"
     exit 1
 fi
 
@@ -104,12 +55,8 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-# Update the secure-command.js to use the local config
-sed -i.bak "s|../agents/secrets-guardian.json|./secrets-guardian.json|g" "$HOOKS_DIR/secure-command.js"
-rm -f "$HOOKS_DIR/secure-command.js.bak"
-
 # Make the hook executable
-chmod +x "$HOOKS_DIR/secure-command.js"
+chmod +x "$HOOKS_DIR/guardian-hook.js"
 
 echo -e "${GREEN}✅ Files downloaded successfully${NC}"
 
@@ -121,7 +68,7 @@ if [ -f "$SETTINGS_FILE" ]; then
     # Backup existing settings
     cp "$SETTINGS_FILE" "$SETTINGS_FILE.backup.$(date +%Y%m%d_%H%M%S)"
     
-    # Use node to update JSON properly with Claude Code format
+    # Use node to update JSON properly with Claude Code array format
     node -e "
     const fs = require('fs');
     const settings = JSON.parse(fs.readFileSync('$SETTINGS_FILE', 'utf8'));
@@ -131,16 +78,25 @@ if [ -f "$SETTINGS_FILE" ]; then
         settings.hooks = {};
     }
     
-    // Initialize PreToolUse if not present
+    // Add PreToolUse hooks in array format (Claude Code format)
     if (!settings.hooks.PreToolUse) {
-        settings.hooks.PreToolUse = {};
+        settings.hooks.PreToolUse = [];
     }
     
-    // Add our hook configurations for Claude Code
-    settings.hooks.PreToolUse.Write = '$HOOKS_DIR/guardian-wrapper.sh Write';
-    settings.hooks.PreToolUse.Edit = '$HOOKS_DIR/guardian-wrapper.sh Edit';
-    settings.hooks.PreToolUse.MultiEdit = '$HOOKS_DIR/guardian-wrapper.sh MultiEdit';
-    settings.hooks.PreToolUse.Bash = '$HOOKS_DIR/guardian-wrapper.sh Bash';
+    // Remove existing guardian hooks if present
+    settings.hooks.PreToolUse = settings.hooks.PreToolUse.filter(h => 
+        !h.hooks || !h.hooks[0] || !h.hooks[0].command || 
+        !h.hooks[0].command.includes('guardian-hook.js')
+    );
+    
+    // Add guardian hook for Write, Edit, MultiEdit, and Bash tools
+    settings.hooks.PreToolUse.push({
+        matcher: 'Write|Edit|MultiEdit|Bash',
+        hooks: [{
+            type: 'command',
+            command: '$HOOKS_DIR/guardian-hook.js'
+        }]
+    });
     
     fs.writeFileSync('$SETTINGS_FILE', JSON.stringify(settings, null, 2));
     "
@@ -149,12 +105,17 @@ else
     cat > "$SETTINGS_FILE" <<EOF
 {
   "hooks": {
-    "PreToolUse": {
-      "Write": "$HOOKS_DIR/guardian-wrapper.sh Write",
-      "Edit": "$HOOKS_DIR/guardian-wrapper.sh Edit",
-      "MultiEdit": "$HOOKS_DIR/guardian-wrapper.sh MultiEdit",
-      "Bash": "$HOOKS_DIR/guardian-wrapper.sh Bash"
-    }
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOOKS_DIR/guardian-hook.js"
+          }
+        ]
+      }
+    ]
   }
 }
 EOF
@@ -166,7 +127,8 @@ echo -e "${YELLOW}Testing installation...${NC}"
 
 # Test with safe content
 echo -e "Testing with safe content..."
-if echo "const config = { debug: true };" | node "$HOOKS_DIR/secure-command.js" > /dev/null 2>&1; then
+test_input='{"toolName":"Write","toolInput":{"content":"const config = { debug: true };"}}'
+if echo "$test_input" | node "$HOOKS_DIR/guardian-hook.js" > /dev/null 2>&1; then
     echo -e "${GREEN}✅ Safe content test passed${NC}"
 else
     echo -e "${RED}❌ Safe content test failed${NC}"
@@ -174,7 +136,8 @@ fi
 
 # Test with secret content
 echo -e "Testing with secret content..."
-if echo "AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE" | node "$HOOKS_DIR/secure-command.js" > /dev/null 2>&1; then
+test_input='{"toolName":"Write","toolInput":{"content":"AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE"}}'
+if echo "$test_input" | node "$HOOKS_DIR/guardian-hook.js" > /dev/null 2>&1; then
     echo -e "${RED}❌ Secret detection test failed - secrets not blocked${NC}"
 else
     echo -e "${GREEN}✅ Secret detection test passed - secrets blocked${NC}"
